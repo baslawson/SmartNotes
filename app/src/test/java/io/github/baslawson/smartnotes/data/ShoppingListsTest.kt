@@ -63,4 +63,33 @@ class ShoppingListsTest {
         assertEquals(milk to milk.copy(name = "Milk"), renamedHistory("milk", milk, milk, "milk", "Milk", 9))
         assertEquals(null to null, renamedHistory("milk", null, null, "milk", "Milk", 9))
     }
+
+    private fun item(id: Long, listId: Long, name: String, quantity: String = "", checked: Boolean = false) =
+        ShoppingItem(id, listId, name, name.lowercase(), quantity, checked, 0, 0, 0)
+
+    @Test fun whichListsCarryOver() {
+        assertEquals(true, carriesOver(list(2, "2026-11-10", createdAt = made("2026-11-09")), today, zone))
+        assertEquals(false, carriesOver(list(3, "2026-11-11"), today, zone))             // today
+        assertEquals(false, carriesOver(list(1, null), today, zone))                     // Anytime
+        assertEquals(false, carriesOver(list(4, "2026-11-01", deleted = 5), today, zone)) // in the bin
+        assertEquals(false, carriesOver(list(5, "2026-11-01", createdAt = made("2026-11-05")), today, zone)) // made afterwards
+    }
+
+    @Test fun carryOverMovesOnceAndKeepsTodaysItem() {
+        val open = listOf(
+            item(10, 2, "Milk"), item(11, 2, "Bread"),            // oldest past list
+            item(12, 3, "milk", "2x"), item(13, 3, "Eggs", "x12"), // a later one: milk again, with a quantity
+            item(14, 3, "Apples", "3"),
+        )
+        val todays = listOf(item(20, 9, "eggs"), item(21, 9, "Apples", "1kg"), item(22, 9, "Bread", checked = true))
+        val plan = planCarryOver(open, todays)
+        // Milk once (the oldest, given the later quantity); eggs and apples and bread already on today's list.
+        assertEquals(listOf(item(10, 2, "Milk", "2x")), plan.move)
+        assertEquals(listOf(item(20, 9, "eggs", "x12")), plan.update)
+        assertEquals(listOf(11L, 12L, 13L, 14L), plan.drop)
+    }
+
+    @Test fun nothingToCarry() {
+        assertEquals(CarryPlan(emptyList(), emptyList(), emptyList()), planCarryOver(emptyList(), listOf(item(1, 9, "milk"))))
+    }
 }

@@ -137,6 +137,12 @@ class AlarmScheduler(private val context: Context, private val db: NoteDatabase,
             LIST -> {
                 val list = db.shopping().list(ownerId) ?: return null
                 if (list.reminderTime() != at) return null
+                // Today's list: what is still to buy on past lists comes over first, so the reminder lists it too.
+                if (list.deletedAt == null && list.date == java.time.LocalDate.now().toString()) {
+                    runCatching { db.shopping().carryOver(java.time.LocalDate.now(), java.time.ZoneId.systemDefault(), System.currentTimeMillis()) }
+                        .onSuccess { if (it > 0) AppLog.i("Shopping", "Carried $it item(s) over before the reminder") }
+                        .onFailure { AppLog.w("Shopping", "Carry-over before the reminder failed", it) }
+                }
                 val open = db.shopping().openItems(ownerId)
                 val text = if (open.isEmpty()) "Nothing left to buy"
                 else "${open.size} to buy: " + open.joinToString(", ") { if (it.quantity.isEmpty()) it.name else "${it.quantity} ${it.name}" }

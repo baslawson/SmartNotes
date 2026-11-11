@@ -35,7 +35,9 @@ Shopping opens on the list you looked at last; the first time, or if that list i
 The chips run Anytime, Today, then the days to come, and the row scrolls to the list shown. Lists whose day has gone
 are under the *Past (n)* chip: it lists them newest first with what each still has to buy, and a tap opens one (its
 chip shows while it is open). The 🔍 in the top bar searches the items of every list in use, past ones too (not the
-recycle bin); results are grouped by list, ticked ones marked, and a tap opens that list. A past list with nothing left to buy (empty or all ticked) goes to the recycle bin by itself when Shopping is
+recycle bin); results are grouped by list, ticked ones marked, and a tap opens that list. What a past list still has to buy carries over to today's list (made if needed) when Shopping is opened, at
+midnight while it is open, and just before today's list reminds you; an item today's list already has isn't added
+twice. A past list with nothing left to buy (empty or all ticked) goes to the recycle bin by itself when Shopping is
 opened; one with things still to buy stays, and so does the list on screen. A list made for a
 past day afterwards, or brought back from the bin, is kept.
 

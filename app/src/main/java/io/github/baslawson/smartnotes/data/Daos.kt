@@ -1,6 +1,8 @@
 package io.github.baslawson.smartnotes.data
 
 import androidx.room.Dao
+import java.time.ZoneId
+import java.time.LocalDate
 import io.github.baslawson.smartnotes.parse.Shopping
 import androidx.room.Insert
 import androidx.room.Query
@@ -128,6 +130,65 @@ interface ShoppingDao {
     @Query("SELECT * FROM shopping_items WHERE id = :id")
     suspend fun item(id: Long): ShoppingItem?
 
+    @Query("SELECT * FROM shopping_items WHERE listId = :listId")
+    suspend fun itemsOf(listId: Long): List<ShoppingItem>
+
+    /**
+     * Moves what is still to buy on past lists (see [carriesOver]) to [today]'s list, made if needed, in one go (see
+     * [planCarryOver]). Returns how many items were carried over (0: nothing to do, no list made).
+     */
+    @Transaction
+    suspend fun carryOver(today: LocalDate, zone: ZoneId, now: Long): Int {
+        val sources = allLists().filter { carriesOver(it, today, zone) }.sortedWith(compareBy({ it.date }, { it.id }))
+        val open = sources.flatMap { l -> openItems(l.id).sortedWith(compareBy({ it.position }, { it.addedAt }, { it.id })) }
+        if (open.isEmpty()) return 0
+        val day = today.toString()
+        val todayId = allLists().firstOrNull { it.date == day }?.id
+            ?: insertList(ShoppingList(name = day, date = day, createdAt = now, position = maxListPosition() + 1))
+        val plan = planCarryOver(open, itemsOf(todayId))
+        var position = maxItemPosition(todayId)
+        // At the end of today's list in every order: "Added" goes by addedAt, My order by position.
+        plan.move.forEachIndexed { i, item -> update(item.copy(listId = todayId, position = ++position, addedAt = now + i)) }
+        plan.update.forEach { update(it) }
+        plan.drop.forEach { delete(it) }
+        return plan.move.size
+    }
+
+    /**
+     * Adds [name]/[quantity] to [listId] in one go (so carrying over meanwhile can't make a second one): returns true
+     * when added, false when the list had it already (unticked, and given the new quantity if one was typed), null when
+     * the list isn't there.
+     */
+    @Transaction
+    suspend fun addItem(listId: Long, name: String, quantity: String, now: Long): Boolean? {
+        if (list(listId).let { it == null || it.deletedAt != null }) return null
+        val key = Shopping.key(name)
+        val existing = findByKey(listId, key)
+        if (existing == null) {
+            // At the end of "My order", as in the order added.
+            insert(ShoppingItem(listId = listId, name = name, key = key, quantity = quantity, addedAt = now,
+                position = maxItemPosition(listId) + 1))
+        } else {
+            update(
+                existing.copy(
+                    quantity = quantity.ifEmpty { existing.quantity },
+                    checked = false,
+                    addedAt = if (existing.checked) now else existing.addedAt,
+                )
+            )
+        }
+        val past = history(key)
+        upsertHistory(ShoppingHistory(key, name, (past?.useCount ?: 0) + 1, now))
+        return existing == null
+    }
+
+    /** Puts back an item removed with ✕ (Undo), unless its list is gone or has it again; in one go. */
+    @Transaction
+    suspend fun restoreItem(item: ShoppingItem) {
+        if (allLists().none { it.id == item.listId } || findByKey(item.listId, item.key) != null) return
+        insert(item)
+    }
+
     /**
      * Renames item [id] (only while its key is still [expectedKey]: a draft made before a restore can't rename another
      * item) to [name]/[quantity], with its suggestions, in one go. False when another item on its list has that name.
@@ -208,14 +269,15 @@ interface ShoppingDao {
     @Query("UPDATE shopping_items SET checked = :checked, checkedAt = :checkedAt WHERE id = :id")
     suspend fun setChecked(id: Long, checked: Boolean, checkedAt: Long)
 
-    @Query("UPDATE shopping_items SET position = :position WHERE id = :id")
-    suspend fun setItemPosition(id: Long, position: Long)
+    /** Only while the item is still on [listId]: an order saved late can't move an item carried to another list. */
+    @Query("UPDATE shopping_items SET position = :position WHERE id = :id AND listId = :listId")
+    suspend fun setItemPosition(listId: Long, id: Long, position: Long)
 
     @Query("SELECT COALESCE(MAX(position), 0) FROM shopping_items WHERE listId = :listId")
     suspend fun maxItemPosition(listId: Long): Long
 
     @Transaction
-    suspend fun setItemPositions(ids: List<Long>) { ids.forEachIndexed { i, id -> setItemPosition(id, i.toLong()) } }
+    suspend fun setItemPositions(listId: Long, ids: List<Long>) { ids.forEachIndexed { i, id -> setItemPosition(listId, id, i.toLong()) } }
 
     @Query("UPDATE shopping_lists SET position = :position WHERE id = :id")
     suspend fun setListPosition(id: Long, position: Long)

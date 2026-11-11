@@ -663,7 +663,7 @@ class ShoppingViewModel(
         orderJobs.trySend {
             if (old != ItemSort.MINE) seed(toSeed(except = list), old)
             if (list > 0) settings.setArranged("items:$list")
-            repo.arrangeItems(ids)
+            repo.arrangeItems(list, ids)
             settings.setItemSort(ItemSort.MINE)
         }
     }
@@ -682,7 +682,19 @@ class ShoppingViewModel(
 
     init {
         // Once per visit to Shopping: past lists with nothing left to buy go to the recycle bin (not the one shown).
-        appScope.launch { runCatching { repo.tidyPast(keep = listId.value) }.onFailure { AppLog.w("Shopping", "Tidy failed", it) } }
+        // First what is still to buy on them moves to today's list.
+        appScope.launch { newDay() }
+    }
+
+    /** Past lists' unticked items carried over to today, then the emptied past lists tidied away (see init). */
+    private suspend fun newDay() {
+        runCatching { repo.carryOver() }.onFailure { AppLog.w("Shopping", "Carry-over failed", it) }
+        runCatching { repo.tidyPast(keep = listId.value) }.onFailure { AppLog.w("Shopping", "Tidy failed", it) }
+    }
+
+    /** The day changed while Shopping was open. */
+    fun dayChanged() {
+        appScope.launch { newDay() }
     }
 
     val state: StateFlow<ShoppingState> = combine(

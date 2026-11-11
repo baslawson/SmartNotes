@@ -598,6 +598,9 @@ fun ShoppingScreen(vm: ShoppingViewModel, setting: ReminderSound, onBack: () -> 
     val checked = state.items.filter { it.checked }
     val selection = vm.selection
     val today = rememberToday()
+    // Midnight (or back after a day away): carry over and tidy as on opening. Not on first showing (init did it).
+    var seenDay by rememberSaveable { mutableStateOf(today.toString()) }
+    LaunchedEffect(today) { if (today.toString() != seenDay) { seenDay = today.toString(); vm.dayChanged() } }
     // Past lists live under the Past chip; the chips show Anytime, today and coming days (and a past list while open).
     val (pastLists, currentLists) = state.lists.partition { it.isPast(today) }
     val chipLists = Sorting.lists(currentLists, listSort, today) + listOfNotNull(pastLists.firstOrNull { it.id == listId })

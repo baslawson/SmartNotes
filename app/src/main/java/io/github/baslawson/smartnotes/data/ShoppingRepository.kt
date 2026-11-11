@@ -37,27 +37,9 @@ class ShoppingRepository(
     suspend fun add(listId: Long, input: String) = lock.withLock {
         val parsed = Shopping.parse(input) ?: return@withLock
         // Only onto a list that is there (the screen may not have picked one yet, or it was just removed).
-        if (dao.list(listId).let { it == null || it.deletedAt != null }) return@withLock
-        val key = Shopping.key(parsed.name)
-        val now = clock.millis()
-        val existing = dao.findByKey(listId, key)
-        if (existing == null) {
-            // At the end of "My order", as in the order added.
-            dao.insert(ShoppingItem(listId = listId, name = parsed.name, key = key, quantity = parsed.quantity, addedAt = now,
-                position = dao.maxItemPosition(listId) + 1))
-        } else {
-            dao.update(
-                existing.copy(
-                    quantity = parsed.quantity.ifEmpty { existing.quantity },
-                    checked = false,
-                    addedAt = if (existing.checked) now else existing.addedAt,
-                )
-            )
-        }
-        AppLog.i("Shopping", (if (existing == null) "Added " else "Re-added ") + parsed.name +
+        val added = dao.addItem(listId, parsed.name, parsed.quantity, clock.millis()) ?: return@withLock
+        AppLog.i("Shopping", (if (added) "Added " else "Re-added ") + parsed.name +
             parsed.quantity.let { if (it.isEmpty()) "" else " ($it)" } + " to list $listId")
-        val past = dao.history(key)
-        dao.upsertHistory(ShoppingHistory(key, parsed.name, (past?.useCount ?: 0) + 1, now))
     }
 
     /**
@@ -79,10 +61,7 @@ class ShoppingRepository(
     suspend fun delete(id: Long) = lock.withLock { dao.delete(id) }
 
     /** Puts back an item removed with ✕ (Undo), unless its list is gone or has it again. */
-    suspend fun restoreItem(item: ShoppingItem) = lock.withLock {
-        if (dao.allLists().none { it.id == item.listId } || dao.findByKey(item.listId, item.key) != null) return@withLock
-        dao.insert(item)
-    }
+    suspend fun restoreItem(item: ShoppingItem) = lock.withLock { dao.restoreItem(item) }
 
     suspend fun clearChecked(listId: Long) = lock.withLock {
         dao.clearChecked(listId)
@@ -138,15 +117,24 @@ class ShoppingRepository(
         }
     }
 
+    /**
+     * Carries what is still to buy on past lists over to today's list (see [ShoppingDao.carryOver]). Run when Shopping
+     * opens (before [tidyPast], which then bins the emptied lists) and when the day changes while it is open.
+     */
+    suspend fun carryOver(today: LocalDate = LocalDate.now()) = lock.withLock {
+        val moved = dao.carryOver(today, ZoneId.systemDefault(), clock.millis())
+        if (moved > 0) AppLog.i("Shopping", "Carried $moved item(s) over to today's list")
+    }
+
     /** "My order": the lists' ids in their new order. */
     suspend fun arrangeLists(ids: List<Long>) = lock.withLock { dao.setListPositions(ids) }
 
     /** "My order": the items' ids (of one list) in their new order. */
-    suspend fun arrangeItems(ids: List<Long>) = lock.withLock { dao.setItemPositions(ids) }
+    suspend fun arrangeItems(listId: Long, ids: List<Long>) = lock.withLock { dao.setItemPositions(listId, ids) }
 
     /** "My order" chosen the first time: [order] of the list's items still to buy, read and saved in one go. */
     suspend fun arrangeItemsFrom(listId: Long, order: (List<ShoppingItem>) -> List<ShoppingItem>) = lock.withLock {
-        dao.setItemPositions(order(dao.openItems(listId)).map { it.id })
+        dao.setItemPositions(listId, order(dao.openItems(listId)).map { it.id })
     }
 
     /** "My order" chosen the first time for the lists: [order] of the lists in use, read and saved in one go. */
@@ -198,6 +186,44 @@ fun listsToTidy(lists: List<ShoppingList>, today: LocalDate, withOpenItems: Set<
     val made = Instant.ofEpochMilli(l.createdAt).atZone(zone).toLocalDate()
     l.id != 1L && l.deletedAt == null && day != null && day.isBefore(today) && l.id !in withOpenItems && !made.isAfter(day)
 }.map { it.id }
+
+/**
+ * A list whose unticked items carry over to today: dated before [today], in use, and made on or before its day (a list
+ * made for a past day afterwards, or brought back from the bin, is left as it is, as [listsToTidy] does).
+ */
+fun carriesOver(l: ShoppingList, today: LocalDate, zone: ZoneId): Boolean {
+    val day = l.date?.let { runCatching { LocalDate.parse(it) }.getOrNull() } ?: return false
+    val made = Instant.ofEpochMilli(l.createdAt).atZone(zone).toLocalDate()
+    return l.id != 1L && l.deletedAt == null && day.isBefore(today) && !made.isAfter(day)
+}
+
+/** What carrying over does: items to [move] to today's list (in order), today's items to [update], items to [drop]. */
+data class CarryPlan(val move: List<ShoppingItem>, val update: List<ShoppingItem>, val drop: List<Long>)
+
+/**
+ * [open]: the unticked items of the past lists, oldest list first. An item today's list already has (by name, ticked
+ * or not) isn't carried twice: the past one is dropped, and today's takes its quantity if it had none. The same item
+ * on several past lists is carried once (the oldest, given a later one's quantity if it had none).
+ */
+fun planCarryOver(open: List<ShoppingItem>, todayItems: List<ShoppingItem>): CarryPlan {
+    val todays = todayItems.associateBy { it.key }.toMutableMap()
+    val moving = LinkedHashMap<String, ShoppingItem>()
+    val updated = LinkedHashMap<Long, ShoppingItem>()
+    val drop = mutableListOf<Long>()
+    for (item in open) {
+        val kept = moving[item.key] ?: todays[item.key]
+        if (kept == null) {
+            moving[item.key] = item
+            continue
+        }
+        drop += item.id
+        if (kept.quantity.isEmpty() && item.quantity.isNotEmpty()) {
+            val filled = kept.copy(quantity = item.quantity)
+            if (item.key in moving) moving[item.key] = filled else { todays[item.key] = filled; updated[filled.id] = filled }
+        }
+    }
+    return CarryPlan(moving.values.toList(), updated.values.toList(), drop)
+}
 
 /**
  * The order of the list chips: Anytime (undated) first, then today and the days to come (soonest first), then past
