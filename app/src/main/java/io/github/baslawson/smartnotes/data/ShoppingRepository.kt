@@ -68,6 +68,11 @@ class ShoppingRepository(
         dao.setChecked(item.id, checked, if (checked) clock.millis() else 0)
     }
 
+    /** A tick on the shopping widget's line for item [id] on list [listId] (see [ShoppingDao.tickFromWidget]). */
+    suspend fun tickFromWidget(id: Long, listId: Long) = lock.withLock {
+        dao.tickFromWidget(id, listId, LocalDate.now(clock), clock.zone, clock.millis())
+    }
+
     suspend fun delete(id: Long) = lock.withLock { dao.delete(id) }
 
     /** Removes several items at once (selected). */
@@ -250,6 +255,16 @@ fun carriesOver(l: ShoppingList, today: LocalDate, zone: ZoneId): Boolean {
     val day = l.date?.let { runCatching { LocalDate.parse(it) }.getOrNull() } ?: return false
     val made = Instant.ofEpochMilli(l.createdAt).atZone(zone).toLocalDate()
     return l.id != 1L && l.deletedAt == null && day.isBefore(today) && !made.isAfter(day)
+}
+
+/**
+ * What a widget tick on [item] ticks: the item, and when it's on a past list that carries over, the other open
+ * copies of its name on lists that carry over too (the widget shows them as one line; carrying over keeps one).
+ */
+fun copiesToTick(lists: List<ShoppingList>, items: List<ShoppingItem>, item: ShoppingItem, today: LocalDate, zone: ZoneId): List<ShoppingItem> {
+    val carried = lists.filter { carriesOver(it, today, zone) }.map { it.id }.toSet()
+    if (item.listId !in carried) return listOf(item)
+    return listOf(item) + items.filter { it.id != item.id && it.listId in carried && !it.checked && it.key == item.key }
 }
 
 /** What carrying over does: items to [move] to today's list (in order), today's items to [update], items to [drop]. */

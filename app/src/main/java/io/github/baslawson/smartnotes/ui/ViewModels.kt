@@ -102,6 +102,7 @@ class NotesViewModel(
     private val appScope: CoroutineScope,
     private val saved: AppState? = null,
     private val settings: AppSettings,
+    private val everywhere: Everywhere? = null,
 ) : ViewModel() {
     val sort: StateFlow<NoteSort> = settings.noteSort
 
@@ -139,6 +140,12 @@ class NotesViewModel(
     val query = MutableStateFlow(saved?.notesQuery.orEmpty())
     val tag = MutableStateFlow(saved?.notesTag)
 
+    /** What the search box finds in the other sections too (tasks, shopping), listed below the notes. */
+    val found: StateFlow<Found> = (everywhere?.find(query) ?: flowOf(Found())).stateIn(viewModelScope, SHARING, Found())
+
+    /** Ticks a task found by the search. */
+    fun setTaskDone(todo: Todo, done: Boolean) { everywhere?.setDone(todo, done) }
+
     init {
         viewModelScope.launch { query.drop(1).collect { saved?.notesQuery = it } }
         viewModelScope.launch { tag.drop(1).collect { saved?.notesTag = it } }
@@ -150,7 +157,7 @@ class NotesViewModel(
         tag,
         sort,
     ) { (q, results), all, selected, order ->
-        val terms = Search.terms(q)
+        val terms = Search.terms(q, limit = Int.MAX_VALUE)
         val tagsOf = all.associate { it.id to NoteParser.tags(it.title + "\n" + it.body) }
         val counts = tagsOf.values.flatten().groupingBy { it }.eachCount()
             .toList().sortedWith(compareByDescending<Pair<String, Int>> { it.second }.thenBy { it.first })
@@ -435,6 +442,7 @@ class TodoViewModel(
     private val bin: RecycleBin,
     private val appScope: CoroutineScope,
     private val settings: AppSettings,
+    private val everywhere: Everywhere? = null,
 ) : ViewModel() {
     val selection = Selection()
     val sort: StateFlow<TaskSort> = settings.taskSort
@@ -499,6 +507,9 @@ class TodoViewModel(
 
     /** The search box's text; null while search is closed. */
     val searchQuery = MutableStateFlow<String?>(null)
+
+    /** What the search finds: tasks, and notes and shopping too. */
+    val found: StateFlow<Found> = (everywhere?.find(searchQuery) ?: flowOf(Found())).stateIn(viewModelScope, SHARING, Found())
 
     /** Moves the ticked tasks to the recycle bin. */
     fun clearDone() = appScope.launch { bin.trash(BinKind.TASK, repo.doneIds()) }
@@ -655,6 +666,7 @@ class ShoppingViewModel(
     private val prefs: android.content.SharedPreferences?,
     startList: Long,
     private val settings: AppSettings,
+    private val everywhere: Everywhere? = null,
 ) : ViewModel() {
     val itemSort: StateFlow<ItemSort> = settings.itemSort
     /** Ticked items shown ("In the basket"; hidden to start with). */
@@ -737,8 +749,6 @@ class ShoppingViewModel(
     private val startedOn = startList
 
     init {
-        // Opened from a list's reminder: that list's day.
-        if (startList > 0) openListId(startList)
         // Once per visit to Shopping: what is still to buy on past lists moves to today's list, then past lists with
         // nothing left to buy go to the recycle bin (not the one shown).
         appScope.launch { newDay() }
@@ -772,12 +782,11 @@ class ShoppingViewModel(
     /** The search box's text; null while search is closed. */
     val searchQuery = MutableStateFlow<String?>(null)
 
-    /** Items in every list in use (past ones too) matching the search; empty until something is typed. */
-    val searchResults: StateFlow<List<ShoppingItem>> = searchQuery
-        .map { it?.trim().orEmpty() }
-        .distinctUntilChanged()
-        .flatMapLatest { q -> if (q.isEmpty()) flowOf(emptyList()) else repo.search(q) }
-        .stateIn(viewModelScope, SHARING, emptyList())
+    /** What the search finds: shopping items in every list in use (past ones too), and notes and tasks. */
+    val found: StateFlow<Found> = (everywhere?.find(searchQuery) ?: flowOf(Found())).stateIn(viewModelScope, SHARING, Found())
+
+    /** Ticks a task found by the search. */
+    fun setTaskDone(todo: Todo, done: Boolean) { everywhere?.setDone(todo, done) }
 
     /** Counts every [show], so the week strip comes back to the day shown even when it is the same day again. */
     var shownTimes by mutableIntStateOf(0)
@@ -885,6 +894,13 @@ class ShoppingViewModel(
 
     private companion object {
         const val KEY_DAY = "shopping_day"
+    }
+
+    // Last, once every field above is set: opening a list shows its day (show() uses the selection and shownTimes),
+    // and that can run straight away.
+    init {
+        // Opened on a list (its reminder, a search result elsewhere): that list's day.
+        if (startList > 0) openListId(startList)
     }
 }
 

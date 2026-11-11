@@ -192,4 +192,24 @@ class InputAndSwipeTest {
             app.settings.setTaskSort(io.github.baslawson.smartnotes.data.TaskSort.PRIORITY)
         }
     }
+
+    @Test fun searchFindsEveryNoteTaskAndItem() {
+        val word = "zq$run"
+        runBlocking {
+            app.notes.saveFinal(0, "Note $word", "body")
+            app.todos.add("Task $word")
+            app.shopping.add(app.shopping.listForDate(LocalDate.now()), "item $word")
+        }
+        tab("Tasks")
+        compose.onNodeWithContentDescription("Search everything").performClick()
+        compose.onNode(hasSetTextAction()).performTextInput(word)
+        until { compose.onAllNodesWithText("In Shopping (1)").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("In Tasks (1)").assertExists()
+        compose.onNodeWithText("In Notes (1)").assertExists()
+        // The item says where it is, and a tap opens that list in Shopping.
+        compose.onNodeWithText("Shopping · Today").assertExists()
+        compose.onNodeWithText("item $word").performClick()
+        until { compose.onAllNodesWithText("item $word").fetchSemanticsNodes().isNotEmpty() && compose.onAllNodesWithText("In Shopping (1)").fetchSemanticsNodes().isEmpty() }
+        compose.onNode(hasText("Shopping") and hasClickAction()).assertExists()
+    }
 }

@@ -114,8 +114,21 @@ fun NotesScreen(
     onSettings: () -> Unit,
     onBin: () -> Unit,
     bottomBar: @Composable () -> Unit,
+    onOpenTask: (Long) -> Unit = {},
+    onOpenItem: (io.github.baslawson.smartnotes.data.ShoppingItem, io.github.baslawson.smartnotes.data.ShoppingList) -> Unit = { _, _ -> },
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
+    // The search finds tasks and shopping items too: listed below the notes, under their own headings.
+    val found by vm.found.collectAsStateWithLifecycle()
+    var expanded by rememberSaveable(found.query) { mutableStateOf(emptyList<String>()) }
+    val actions = HitActions(
+        openNote = onOpen, openTask = onOpenTask, checkTask = vm::setTaskDone,
+        openItem = onOpenItem, showAll = { expanded = expanded + it.name },
+    )
+    // Only once the search has results for what's in the box (not for what was typed before).
+    val typed by vm.query.collectAsStateWithLifecycle()
+    val searching = found.terms.isNotEmpty() && found.loaded && found.query == typed.trim()
+    val others = if (searching) Hits.of(found, Section.NOTES, expanded.map(Section::valueOf).toSet(), withOwn = false) else emptyList()
     var menu by remember { mutableStateOf(false) }
     val selection = vm.selection
     LaunchedEffect(state.rows) { if (state.loaded) selection.keepOnly(state.rows.map { it.note.id }) }
@@ -168,7 +181,7 @@ fun NotesScreen(
                 onValueChange = { vm.query.value = it },
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
                 shape = PillShape, colors = pillColors(),
-                placeholder = { Text("Search notes") },
+                placeholder = { Text("Search everything") },
                 leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                 trailingIcon = {
                     if (query.isNotEmpty()) IconButton(onClick = { vm.query.value = "" }) {
@@ -193,8 +206,14 @@ fun NotesScreen(
             }
             when {
                 !state.loaded -> Unit
+                state.rows.isEmpty() && others.isNotEmpty() ->
+                    // No note matches, but tasks or shopping items do.
+                    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 88.dp)) {
+                        hits(listOf(Hit.Head(Section.NOTES, 0), Hit.NoneIn(Section.NOTES)) + others, state.terms, actions)
+                    }
                 state.rows.isEmpty() ->
                     if (query.isBlank() && selectedTag == null) EmptyState(Icons.Default.Edit, "No notes yet", "Tap + to write your first one.")
+                    else if (searching && selectedTag == null) EmptyState(Icons.Default.Search, "Nothing found", "Nothing in Notes, Tasks or Shopping matches \"${found.query}\".")
                     else EmptyState(Icons.Default.Search, "Nothing found", "Try other words, or another tag.")
                 else -> {
                     val byId = state.rows.associateBy { it.note.id }
@@ -216,6 +235,9 @@ fun NotesScreen(
                             contentPadding = PaddingValues(start = 8.dp, end = 8.dp, bottom = 88.dp),
                         ) {
                             item(key = "tip", span = StaggeredGridItemSpan.FullLine) { OneTimeTip("notes", tip, horizontal = 4.dp) }
+                            if (searching) item(key = "s:NOTES", span = StaggeredGridItemSpan.FullLine) {
+                                HitLine(Hit.Head(Section.NOTES, state.rows.size), state.terms, actions)
+                            }
                             items(order.ids.mapNotNull { byId[it] }, key = { it.note.id }) { row ->
                                 ReorderableItem(reorder, key = row.note.id, enabled = canArrange) { dragging ->
                                     NoteCard(row, state.terms, dragging, canArrange, Modifier.selectable(selection, row.note.id) { onOpen(row.note.id) }) {
@@ -227,12 +249,17 @@ fun NotesScreen(
                                     }
                                 }
                             }
+                            // Tasks and shopping items found too, across the whole width.
+                            others.forEach { hit ->
+                                item(key = hit.key, span = StaggeredGridItemSpan.FullLine) { HitLine(hit, state.terms, actions) }
+                            }
                         }
                         return@Column
                     }
                     val reorder = rememberReorderableLazyListState(list) { from, to -> move(from.key, to.key) }
                     LazyColumn(Modifier.fillMaxSize(), list, contentPadding = PaddingValues(bottom = 88.dp)) {
                         item(key = "tip") { OneTimeTip("notes", tip) }
+                        if (searching) item(key = "s:NOTES") { HitLine(Hit.Head(Section.NOTES, state.rows.size), state.terms, actions) }
                         items(order.ids.mapNotNull { byId[it] }, key = { it.note.id }) { row ->
                             ReorderableItem(reorder, key = row.note.id, enabled = canArrange) { dragging ->
                                 RowCard(dragging = dragging) {
@@ -246,6 +273,8 @@ fun NotesScreen(
                                 }
                             }
                         }
+                        // Tasks and shopping items found too.
+                        hits(others, state.terms, actions)
                     }
                 }
             }
@@ -254,7 +283,7 @@ fun NotesScreen(
 }
 
 @Composable
-private fun NoteRowItem(row: NoteRow, terms: List<String>, modifier: Modifier) {
+internal fun NoteRowItem(row: NoteRow, terms: List<String>, modifier: Modifier) {
     Column(Modifier.fillMaxWidth().then(modifier).padding(horizontal = 16.dp, vertical = 12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (row.note.pinned) {

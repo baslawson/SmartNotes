@@ -16,8 +16,8 @@ android {
         applicationId = "io.github.baslawson.smartnotes"
         minSdk = 26 // java.time works natively from API 26
         targetSdk = 36 // Android 16, as on the Samsung Galaxy S26
-        versionCode = 16
-        versionName = "0.6.0"
+        versionCode = 17
+        versionName = "0.7.0"
         // Instrumented UI tests (app/src/androidTest) run on the devbox emulator, never a phone: real swipes and taps.
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -83,9 +83,12 @@ dependencies {
     // GitHub releases for Settings → Updates.
     implementation(libs.okhttp)
     implementation(libs.reorderable)
+    implementation(libs.androidx.glance.appwidget)
+    implementation(libs.androidx.glance.material3)
 
     // Plain JVM tests (app/src/test): note parsing, search, shopping list, the log file and updates.
     testImplementation(libs.junit)
+    testImplementation(libs.androidx.glance.testing)
     testImplementation(libs.org.json)
     testImplementation(libs.robolectric)
     testImplementation(libs.roborazzi)

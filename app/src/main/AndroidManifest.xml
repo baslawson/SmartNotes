@@ -52,6 +52,21 @@
                 <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" />
             </intent-filter>
         </receiver>
+        <!-- Home-screen widgets: Today's tasks and Today's shopping (widget/Widgets.kt). -->
+        <receiver android:name=".widget.TasksWidgetReceiver" android:exported="true" android:label="Today's tasks">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/tasks_widget" />
+        </receiver>
+        <receiver android:name=".widget.ShoppingWidgetReceiver" android:exported="true" android:label="Today's shopping">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/shopping_widget" />
+        </receiver>
+        <!-- Redraws the widgets just after midnight (set while a widget is placed). -->
+        <receiver android:name=".widget.MidnightReceiver" android:exported="false" />
         <!-- Plays the looping alarm sound; a media-playback foreground service keeps it going while it rings. -->
         <service
             android:name=".reminders.AlarmService"

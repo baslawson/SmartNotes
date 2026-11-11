@@ -122,7 +122,7 @@ class ScreenshotTest {
         compose.waitForIdle()
         // Tasks: 🔍 in the add box searches all tasks, done ones too.
         compose.onNodeWithText("Tasks").performClick()
-        compose.onNodeWithContentDescription("Search tasks").performClick()
+        compose.onNodeWithContentDescription("Search everything").performClick()
         compose.onNode(hasSetTextAction()).performTextInput("the")
         shot("light-8-task-search", "Water the plants")
         // A date typed at the end: the chip shows the reminder it will set.
@@ -159,6 +159,36 @@ class ScreenshotTest {
         compose.waitForIdle()
         compose.waitUntil(10_000) { runBlocking { app.todos.observeAll().first().first { it.title == "Plan the party" }.details.endsWith("\n- [ ] Buy balloons") } }
         compose.onNodeWithText("Steps · 2 of 4").assertExists()
+    }
+
+    /** Every section's 🔍 finds notes, tasks and shopping items, each under its own heading. */
+    @Test fun searchFindsEverywhere() {
+        val app = app()
+        runBlocking {
+            app.notes.saveFinal(0, "Recipes", "Lemon pasta: lemon, parmesan, butter #food")
+            app.todos.add("Buy a lemon squeezer")
+            app.shopping.add(app.shopping.listForDate(LocalDate.now()), "3 lemons")
+        }
+        // From Shopping: shopping first, then notes and tasks.
+        compose.onNodeWithText("Shopping").performClick()
+        compose.waitUntil(10_000) { compose.onAllNodesWithContentDescription("Search everything").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithContentDescription("Search everything").performClick()
+        compose.onNode(hasSetTextAction()).performTextInput("lemon")
+        shot("light-12-search-from-shopping", "In Tasks (1)")
+        compose.onNodeWithText("In Shopping (1)").assertExists()
+        compose.onNodeWithText("In Notes (1)").assertExists()
+        compose.onNodeWithText("Shopping · Today").assertExists()
+        // A note found here opens.
+        compose.onNodeWithText("Recipes").performClick()
+        compose.waitUntil(10_000) { compose.onAllNodesWithText("Lemon pasta", substring = true).fetchSemanticsNodes().isNotEmpty() }
+        compose.activity.onBackPressedDispatcher.let { compose.runOnUiThread { it.onBackPressed() } }
+        compose.waitForIdle()
+        // From Notes: the notes, then tasks and shopping below them.
+        compose.onNodeWithText("Notes").performClick()
+        compose.onNode(hasSetTextAction()).performTextInput("lemon")
+        shot("light-13-search-from-notes", "In Shopping (1)")
+        compose.onNodeWithText("In Notes (1)").assertExists()
+        compose.onNodeWithText("Buy a lemon squeezer").assertExists()
     }
 
     @Test fun dark() {

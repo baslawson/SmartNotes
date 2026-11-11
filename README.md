@@ -13,7 +13,22 @@ Everything "smart" in a note is read from its plain text, so the text stays the 
 | `[[Trip plan]]` or `[[Trip plan\|shown]]` | a link to the note with that title; the other note lists it under *Linked from* |
 | `- [ ] buy milk` / `- [x] done` | a checkbox, ticked from the note's *Checklist* (it stays in the note; it isn't a to-do task) |
 
-Also: full-text search (Room FTS4, word prefixes, matches highlighted), related notes (shared tags and words), and
+**Search everything:** the search box on Notes and the 🔍 on Tasks and Shopping each find notes, tasks and shopping
+items together. Every word typed must start a word in the note, the task (title or details) or the item, capitals
+ignored ("den call" finds "Call the dentist"); matches are highlighted; nothing in the recycle bin is searched. Results
+come under *In Notes*, *In Tasks* and *In Shopping* with how many each found, the section searched from first (on Notes,
+the notes keep their list or grid and the others follow below them). The other sections show their first 5 (*Show
+all* for the rest). A task shows its reminder, steps and whether it's done (tick it there too); an item shows its list
+("Shopping · Fri 14 Nov", "Anytime") and whether it's ticked. A tap opens the note, the task or that day's list. The
+#tag chips filter only notes.
+
+**Widgets** (long-press the home screen → Widgets → SmartNotes): *Today's tasks* lists open tasks due today or
+overdue (overdue in red), each with a box to tick it off; tap one to open it, the title to open Tasks. *Today's
+shopping* lists what's still to buy today with its quantity, boxes to tick: today's list, then what past days still
+have (it carries over to today when Shopping opens); a tap opens today in Shopping. They update with every change, just
+after midnight (also when the app isn't running), and at least hourly.
+
+Also: related notes (shared tags and words), and
 **Share → SmartNotes** from other apps: a small dialog asks what the text or link becomes. *A note* (the subject is its
 title), *A task* (the subject or first line is its title, the rest its details; no reminder is read from shared words) or
 *Shopping for today* (each line of the text an item; bullets, boxes and "1." numbering left off). *Cancel* or Back
@@ -41,11 +56,9 @@ the end count, so "Buy sun cream" isn't Sunday; a date alone reminds at 9:00. En
 **Swipe** a task or shopping item right to tick it (a ticked one: untick it), left to delete it (with *Undo*), as
 TalkBack's actions too. Not while selecting.
 
-On the right of the add box: ✓ adds what is typed, 🔍 searches all tasks (starting with what is typed, if anything).
-Every word typed must start a word in the task's title or details, capitals ignored ("den call" finds "Call the
-dentist"). Open tasks come first in the chosen order, then done ones (latest done first, struck through), the matches
-highlighted; when the match is in the details, that part of them shows. Tap a result to open the task; ← or Back
-closes the search.
+On the right of the add box: ✓ adds what is typed, 🔍 searches everything (see *Search everything*; starting with
+what is typed, if anything). Tasks come first: open ones in the chosen order, then done ones (latest done first, struck
+through); when the match is in the details, that part of them shows. ← or Back closes the search.
 
 ## Shopping
 
@@ -67,8 +80,8 @@ the other day already has isn't added twice: it takes the moved quantity (unless
 if either was.
 
 Shopping opens on the day you looked at last (today if that day has gone by). The 🔍 at the right of the add box
-searches (for what is typed, if anything) the items of every list in use, past ones too (not the recycle bin); results
-are grouped by day, ticked ones marked, and a tap opens that day. What a past day still has to buy carries over to
+searches everything (see *Search everything*; for what is typed, if anything): items first, from every list in use,
+past ones too, still to buy before ticked, each with its day; a tap opens that day. What a past day still has to buy carries over to
 today's list (made if needed) when Shopping is opened, at midnight while it is open, and just before today's list
 reminds you; an item today's list already has isn't added twice. A past list with nothing left to buy (empty or all
 ticked) goes to the recycle bin by itself when Shopping is opened; one with things still to buy stays, and so does the
@@ -203,7 +216,8 @@ app/src/main/java/io/github/baslawson/smartnotes/
                Updates (GitHub releases)
   reminders/   ReminderRules (sounds, repeat, snooze, alarm planning; unit tested), AlarmScheduler and receivers,
                AlarmService (ringing), SnoozeActivity
-  ui/          screens and their ViewModels
+  ui/          screens and their ViewModels; Everywhere (the search across all sections)
+  widget/      the home-screen widgets (Jetpack Glance) and what they show (WidgetData; unit tested)
   AppLog.kt    the debug log;  AppSettings.kt  settings;  AppState.kt  where the app was left
   MainActivity.kt, SmartNotesApp.kt
 app/schemas/   Room schema per database version (for migrations)

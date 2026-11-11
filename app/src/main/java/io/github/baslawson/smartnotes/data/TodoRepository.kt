@@ -66,12 +66,17 @@ class TodoRepository(private val dao: TodoDao, private val alarms: AlarmSchedule
     /**
      * Ticks or unticks a task. A repeating task ticked off isn't done: it moves on to its next date (and its reminder
      * with it), as in Planner. With [onlyIfDueAt] (a notification's Done) nothing happens unless that is still the
-     * task's reminder time, so an old notification can't tick off a later date.
+     * task's reminder time, so an old notification can't tick off a later date. With [onlyIfOpenOn] (a widget's box)
+     * nothing happens unless the task is still open and due that day, so ticking an old row twice can't skip dates.
      */
-    suspend fun setDone(id: Long, done: Boolean, onlyIfDueAt: LocalDateTime? = null) = lock.withLock {
+    suspend fun setDone(id: Long, done: Boolean, onlyIfDueAt: LocalDateTime? = null, onlyIfOpenOn: String? = null) = lock.withLock {
         val todo = dao.get(id) ?: return@withLock
         if (onlyIfDueAt != null && todo.reminderTime() != onlyIfDueAt) {
             AppLog.i("Todo", "Done from an old reminder ($onlyIfDueAt) ignored for task $id: it has changed since")
+            return@withLock
+        }
+        if (onlyIfOpenOn != null && (todo.done || todo.deletedAt != null || todo.dueDate != onlyIfOpenOn)) {
+            AppLog.i("Todo", "Done from an old widget row ($onlyIfOpenOn) ignored for task $id: it has changed since")
             return@withLock
         }
         val next = if (done) nextDue(todo) else null

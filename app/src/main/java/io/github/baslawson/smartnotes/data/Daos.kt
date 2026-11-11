@@ -310,6 +310,20 @@ interface ShoppingDao {
     )
     fun search(pattern: String): Flow<List<ShoppingItem>>
 
+    /**
+     * A tick on the shopping widget's line for item [id] on list [listId], in one go: the item and the copies of its
+     * name the widget showed as that line ([copiesToTick]). Nothing happens if the item has gone, moved or is ticked
+     * already, or if its list is in the recycle bin.
+     */
+    @Transaction
+    suspend fun tickFromWidget(id: Long, listId: Long, today: java.time.LocalDate, zone: java.time.ZoneId, now: Long) {
+        val item = item(id)?.takeIf { it.listId == listId && !it.checked } ?: return
+        val lists = allLists()
+        if (lists.none { it.id == listId }) return
+        val items = lists.filter { it.id != listId && carriesOver(it, today, zone) }.flatMap { openItems(it.id) }
+        copiesToTick(lists, items + item, item, today, zone).forEach { setChecked(it.id, true, now) }
+    }
+
     /** Ticks or unticks just that (not the rest of the row, which may have changed meanwhile: its place, say). */
     @Query("UPDATE shopping_items SET checked = :checked, checkedAt = :checkedAt WHERE id = :id")
     suspend fun setChecked(id: Long, checked: Boolean, checkedAt: Long)

@@ -1,3 +1,5 @@
 <resources>
     <string name="app_name">SmartNotes</string>
+    <string name="tasks_widget_description">Tasks due today and overdue, to tick off</string>
+    <string name="shopping_widget_description">What\'s still to buy today, to tick off</string>
 </resources>

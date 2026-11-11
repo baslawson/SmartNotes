@@ -10,9 +10,12 @@ object Search {
     fun terms(input: String, limit: Int = 10): List<String> =
         WORD.findAll(input).map { it.value.lowercase() }.distinct().take(limit).toList()
 
-    /** As [terms] used to be for the notes index (lowercased first), so FTS queries behave as before. */
+    /**
+     * As [terms] used to be for the notes index (lowercased first), so FTS queries behave as before; every word counts
+     * (as in the other sections' search).
+     */
     private fun ftsTerms(input: String): List<String> =
-        WORD.findAll(input.lowercase()).map { it.value }.distinct().take(10).toList()
+        WORD.findAll(input.lowercase()).map { it.value }.distinct().toList()
 
     /**
      * An FTS4 MATCH expression: every word must appear, each as a word prefix (`gro` finds "groceries").

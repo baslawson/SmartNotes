@@ -209,10 +209,10 @@ class MainActivity : ComponentActivity() {
                         pending.route.collect { route ->
                             if (route != null) {
                                 pending.route.value = null
-                                // A shopping list opens as the Shopping tab, not on top of it. A route the app doesn't
+                                // A shopping list (or Tasks, from its widget) opens as that tab, not on top of it. A route the app doesn't
                                 // know (another app can start this screen) is logged and ignored, not a crash.
                                 runCatching {
-                                    if (route.startsWith("shopping")) nav.navigate(route) { popUpTo(NOTES); launchSingleTop = true }
+                                    if (route.startsWith("shopping") || route == TASKS) nav.navigate(route) { popUpTo(NOTES); launchSingleTop = true }
                                     else nav.navigate(route)
                                 }.onFailure { AppLog.w("App", "Ignored an unknown screen: $route", it) }
                             }
@@ -319,6 +319,15 @@ private fun noteRoute(id: Long, title: String = "") = "note/$id?title=${Uri.enco
 private fun AppNavHost(nav: NavHostController, app: SmartNotesApp) {
     val bottomBar: @Composable () -> Unit = { BottomBar(nav) }
     val open: (Long) -> Unit = { nav.navigate(noteRoute(it)) }
+    // From a search result elsewhere: a task opens on top; a shopping list opens as the Shopping tab (as from a reminder).
+    val openTask: (Long) -> Unit = { nav.navigate("todo/$it") }
+    val openList: (Long) -> Unit = { nav.navigate("shopping?list=$it") { popUpTo(NOTES); launchSingleTop = true } }
+    // An item found on a past day's list that's still to buy: opening Shopping carries it over to today, so show today.
+    val openItem: (io.github.baslawson.smartnotes.data.ShoppingItem, io.github.baslawson.smartnotes.data.ShoppingList) -> Unit = { item, list ->
+        // An open item on a past list that carries over is on today's list once Shopping opens; others stay where they are.
+        val carried = !item.checked && io.github.baslawson.smartnotes.data.carriesOver(list, java.time.LocalDate.now(), java.time.ZoneId.systemDefault())
+        openList(if (carried) -1L else list.id)
+    }
     // Back on every screen but Notes: to wherever you came from (from a tab, that is Notes).
     val back: () -> Unit = { if (!nav.popBackStack()) nav.navigate(NOTES) }
     // Screens fade in and rise a little; going back, they fade and sink.
@@ -330,23 +339,24 @@ private fun AppNavHost(nav: NavHostController, app: SmartNotesApp) {
         popExitTransition = { fadeOut(tween(150)) + slideOutVertically(tween(150)) { it / 24 } },
     ) {
         composable(NOTES) { AccentTheme(Accent.NOTES) {
-            val vm = viewModel { NotesViewModel(app.notes, app.bin, app.appScope, app.state, app.settings) }
+            val vm = viewModel { NotesViewModel(app.notes, app.bin, app.appScope, app.state, app.settings, app.everywhere) }
             NotesScreen(
                 vm, onOpen = open, onNew = { nav.navigate(noteRoute(0)) },
                 onSettings = { nav.navigate(SETTINGS) }, onBin = { nav.navigate(BIN) }, bottomBar = bottomBar,
+                onOpenTask = openTask, onOpenItem = openItem,
             )
         } }
         composable(TASKS) { AccentTheme(Accent.TASKS) {
-            val vm = viewModel { TodoViewModel(app.todos, app.bin, app.appScope, app.settings) }
-            TasksScreen(vm, onOpen = { nav.navigate("todo/$it") }, onBack = back, bottomBar = bottomBar)
+            val vm = viewModel { TodoViewModel(app.todos, app.bin, app.appScope, app.settings, app.everywhere) }
+            TasksScreen(vm, onOpen = openTask, onBack = back, bottomBar = bottomBar, onOpenNote = open, onOpenItem = openItem)
         } }
         composable(SHOPPING_ROUTE, arguments = listOf(navArgument("list") { type = NavType.LongType; defaultValue = 0L })) { entry ->
             val start = entry.arguments?.getLong("list") ?: 0L
-            val vm = viewModel { ShoppingViewModel(app.shopping, app.bin, app.appScope, app.getSharedPreferences("lists", android.content.Context.MODE_PRIVATE), start, app.settings) }
-            // Opened again for another list (from a reminder): show that one.
-            LaunchedEffect(start) { if (start > 0) vm.openListId(start) }
+            val vm = viewModel { ShoppingViewModel(app.shopping, app.bin, app.appScope, app.getSharedPreferences("lists", android.content.Context.MODE_PRIVATE), start, app.settings, app.everywhere) }
+            // Opened again for another list (a reminder, a search result, a widget): show that one; -1 is today.
+            LaunchedEffect(start) { if (start > 0) vm.openListId(start) else if (start == -1L) vm.show(java.time.LocalDate.now()) }
             val setting by app.settings.reminderSound.collectAsStateWithLifecycle()
-            AccentTheme(Accent.SHOPPING) { ShoppingScreen(vm, setting, onBack = back, bottomBar = bottomBar) }
+            AccentTheme(Accent.SHOPPING) { ShoppingScreen(vm, setting, onBack = back, bottomBar = bottomBar, onOpenNote = open, onOpenTask = openTask) }
         }
         composable(TODO, arguments = listOf(navArgument("id") { type = NavType.LongType })) { entry ->
             val id = entry.arguments?.getLong("id") ?: 0L

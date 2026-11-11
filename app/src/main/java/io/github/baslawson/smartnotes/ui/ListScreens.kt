@@ -251,45 +251,6 @@ private fun rememberToday(): LocalDate {
     return today
 }
 
-/** Search results: matching items grouped under their list (lists in chip order); a tap opens that list. */
-@Composable
-private fun SearchResults(
-    query: String,
-    results: List<ShoppingItem>,
-    lists: List<ShoppingList>,
-    label: (ShoppingList) -> String,
-    onOpen: (Long) -> Unit,
-) {
-    if (query.isBlank()) {
-        EmptyState(Icons.Default.Search, "Search your lists", "Type to find items in all your lists, past ones too.")
-        return
-    }
-    val byList = results.groupBy { it.listId }
-    val groups = lists.filter { it.id in byList }
-    if (groups.isEmpty()) {
-        EmptyState(Icons.Default.Search, "Nothing found", "No item matches \"${query.trim()}\".")
-        return
-    }
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
-        groups.forEach { l ->
-            item(key = "h:${l.id}") { Header(label(l)) }
-            items(byList.getValue(l.id), key = { it.id }) { item ->
-                Row(
-                    Modifier.fillMaxWidth().clickable { onOpen(l.id) }.padding(horizontal = 16.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        item.name, Modifier.weight(1f),
-                        textDecoration = if (item.checked) TextDecoration.LineThrough else null,
-                        color = if (item.checked) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
-                    )
-                    if (item.checked) Text("ticked", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(end = 8.dp))
-                    if (item.quantity.isNotEmpty()) Text(item.quantity, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-                }
-            }
-        }
-    }
-}
 
 /**
  * A task's steps: its details' "- [ ] …" lines, ticked here with their boxes (which changes those lines), and a field
@@ -339,7 +300,7 @@ private fun TaskDayHeader(day: TaskDay, count: Int) {
 }
 
 @Composable
-private fun Header(text: String) {
+internal fun Header(text: String) {
     Text(
         text, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary,
         modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp),
@@ -350,7 +311,14 @@ private fun Header(text: String) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun TasksScreen(vm: TodoViewModel, onOpen: (Long) -> Unit, onBack: () -> Unit, bottomBar: @Composable () -> Unit) {
+fun TasksScreen(
+    vm: TodoViewModel,
+    onOpen: (Long) -> Unit,
+    onBack: () -> Unit,
+    bottomBar: @Composable () -> Unit,
+    onOpenNote: (Long) -> Unit = {},
+    onOpenItem: (ShoppingItem, ShoppingList) -> Unit = { _, _ -> },
+) {
     val state by vm.state.collectAsStateWithLifecycle()
     val selection = vm.selection
     val sort by vm.sort.collectAsStateWithLifecycle()
@@ -370,7 +338,7 @@ fun TasksScreen(vm: TodoViewModel, onOpen: (Long) -> Unit, onBack: () -> Unit, b
                 SelectionBar(selection, shownIds) {
                     IconButton(onClick = vm::deleteSelected) { Icon(Icons.Default.Delete, contentDescription = "Delete") }
                 }
-            } else if (query != null) SearchTopBar(query.orEmpty(), "Search tasks", { vm.searchQuery.value = it }) { vm.searchQuery.value = null }
+            } else if (query != null) SearchTopBar(query.orEmpty(), "Search everything", { vm.searchQuery.value = it }) { vm.searchQuery.value = null }
             else TopAppBar(
                 title = { Text("Tasks") }, navigationIcon = { BackButton(onBack) },
                 actions = {
@@ -389,9 +357,18 @@ fun TasksScreen(vm: TodoViewModel, onOpen: (Long) -> Unit, onBack: () -> Unit, b
                     if (now && !t.done && state.todos.count { !it.done } == 1 && nextDue(t) == null) party.fire(Celebration.TASKS.random())
                     vm.setDone(t, now)
                 }
-                TaskResults(query.orEmpty(), searchTasks(state.todos, query.orEmpty(), sort), onCheck) { id ->
-                    onOpen(id)
-                }
+                // Tasks first, then notes and shopping; only results for what's in the box now.
+                val found by vm.found.collectAsStateWithLifecycle()
+                var expanded by rememberSaveable(found.query) { mutableStateOf(emptyList<String>()) }
+                EverywhereResults(
+                    found.takeIf { it.query == query.orEmpty().trim() } ?: Found(query.orEmpty().trim(), Search.terms(query.orEmpty())),
+                    Section.TASKS, expanded.map(Section::valueOf).toSet(),
+                    HitActions(
+                        openNote = onOpenNote, openTask = onOpen, checkTask = onCheck,
+                        openItem = onOpenItem, showAll = { expanded = expanded + it.name },
+                    ),
+                    "Type to find tasks (done ones too), notes and shopping items.",
+                )
             }
             return@Scaffold
         }
@@ -408,7 +385,7 @@ fun TasksScreen(vm: TodoViewModel, onOpen: (Long) -> Unit, onBack: () -> Unit, b
                 trailingIcon = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         if (vm.input.isNotBlank()) IconButton(onClick = vm::add) { Icon(Icons.Default.Check, contentDescription = "Add") }
-                        IconButton(onClick = { selection.clear(); vm.searchQuery.value = vm.input.trim() }) { Icon(Icons.Default.Search, contentDescription = "Search tasks") }
+                        IconButton(onClick = { selection.clear(); vm.searchQuery.value = vm.input.trim() }) { Icon(Icons.Default.Search, contentDescription = "Search everything") }
                     }
                 },
             )
@@ -528,33 +505,15 @@ private fun SearchTopBar(query: String, placeholder: String, onChange: (String) 
 }
 
 /** Tasks search results: matching tasks (open first, then done), the matches highlighted; a tap opens one. */
-@Composable
-private fun TaskResults(query: String, results: List<Todo>, onCheck: (Todo, Boolean) -> Unit, onOpen: (Long) -> Unit) {
-    if (query.isBlank()) {
-        EmptyState(Icons.Default.Search, "Search your tasks", "Type to find tasks by their title or details, done ones too.")
-        return
-    }
-    if (results.isEmpty()) {
-        EmptyState(Icons.Default.Search, "Nothing found", "No task matches \"${query.trim()}\".")
-        return
-    }
-    val terms = Search.terms(query, limit = Int.MAX_VALUE)
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
-        items(results, key = { it.id }) { t ->
-            RowCard(faded = t.done) {
-                TodoLine(t, onCheck = { onCheck(t, it) }, Modifier.clickable { onOpen(t.id) }, terms)
-            }
-        }
-    }
-}
 
 /** A task's reminder time, when it has one (and isn't done). */
 private fun Todo.reminder(): LocalDateTime? = AlarmPlanner.todoTime(remind, done, dueDate, dueTime)
 
 @Composable
-private fun TodoLine(t: Todo, onCheck: (Boolean) -> Unit, modifier: Modifier, terms: List<String> = emptyList()) {
+internal fun TodoLine(t: Todo, onCheck: (Boolean) -> Unit, modifier: Modifier, terms: List<String> = emptyList()) {
     Row(Modifier.fillMaxWidth().then(modifier).padding(start = 4.dp, end = 16.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-        FunCheckbox(checked = t.done, onCheckedChange = onCheck)
+        // Named after its task, so TalkBack says which one it ticks (rows in search results are separate controls).
+        FunCheckbox(checked = t.done, onCheckedChange = onCheck, Modifier.semantics { contentDescription = t.title })
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (t.priority == 2) Text("! ", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold)
@@ -739,7 +698,14 @@ private fun shortDay(day: LocalDate?, today: LocalDate): String = when (day) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ShoppingScreen(vm: ShoppingViewModel, setting: ReminderSound, onBack: () -> Unit, bottomBar: @Composable () -> Unit) {
+fun ShoppingScreen(
+    vm: ShoppingViewModel,
+    setting: ReminderSound,
+    onBack: () -> Unit,
+    bottomBar: @Composable () -> Unit,
+    onOpenNote: (Long) -> Unit = {},
+    onOpenTask: (Long) -> Unit = {},
+) {
     val state by vm.state.collectAsStateWithLifecycle()
     val day by vm.day.collectAsStateWithLifecycle()
     val listId by vm.listId.collectAsStateWithLifecycle()
@@ -778,7 +744,7 @@ fun ShoppingScreen(vm: ShoppingViewModel, setting: ReminderSound, onBack: () -> 
     val marked = state.lists.mapNotNull { l -> parseDate(l.date)?.takeIf { (openCounts[l.id] ?: 0) > 0 } }.toSet()
     val anytimeCount = openCounts[1L] ?: 0
     val query by vm.searchQuery.collectAsStateWithLifecycle()
-    val results by vm.searchResults.collectAsStateWithLifecycle()
+    val found by vm.found.collectAsStateWithLifecycle()
     BackHandler(enabled = query != null) { vm.searchQuery.value = null }
 
     Scaffold(
@@ -786,7 +752,7 @@ fun ShoppingScreen(vm: ShoppingViewModel, setting: ReminderSound, onBack: () -> 
             if (selection.active) SelectionBar(selection, shown.map { it.id }) {
                 IconButton(onClick = { moving = true }) { Icon(Icons.Default.DateRange, contentDescription = "Move to another day") }
                 IconButton(onClick = { vm.deleteSelected(shown) }) { Icon(Icons.Default.Delete, contentDescription = "Remove items") }
-            } else if (query != null) SearchTopBar(query.orEmpty(), "Search all lists", { vm.searchQuery.value = it }) { vm.searchQuery.value = null }
+            } else if (query != null) SearchTopBar(query.orEmpty(), "Search everything", { vm.searchQuery.value = it }) { vm.searchQuery.value = null }
             else TopAppBar(
                 title = { Text("Shopping") },
                 navigationIcon = { BackButton(onBack) },
@@ -803,10 +769,19 @@ fun ShoppingScreen(vm: ShoppingViewModel, setting: ReminderSound, onBack: () -> 
     ) { padding ->
         if (query != null) {
             Box(Modifier.padding(padding).fillMaxSize()) {
-                SearchResults(query.orEmpty(), results, orderLists(state.lists, today), { it.label(style) }) { id ->
-                    state.lists.firstOrNull { it.id == id }?.let(vm::openList)
-                    vm.searchQuery.value = null
-                }
+                // Shopping first (every list in use, past ones too), then notes and tasks; only results for what's in
+                // the box now.
+                var expanded by rememberSaveable(found.query) { mutableStateOf(emptyList<String>()) }
+                EverywhereResults(
+                    found.takeIf { it.query == query.orEmpty().trim() } ?: Found(query.orEmpty().trim(), Search.terms(query.orEmpty())),
+                    Section.SHOPPING, expanded.map(Section::valueOf).toSet(),
+                    HitActions(
+                        openNote = onOpenNote, openTask = onOpenTask, checkTask = vm::setTaskDone,
+                        openItem = { _, list -> vm.openList(list); vm.searchQuery.value = null },
+                        showAll = { expanded = expanded + it.name },
+                    ),
+                    "Type to find items in all your lists (past ones too), notes and tasks.",
+                )
             }
             return@Scaffold
         }
@@ -838,7 +813,7 @@ fun ShoppingScreen(vm: ShoppingViewModel, setting: ReminderSound, onBack: () -> 
                     trailingIcon = {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             if (vm.input.isNotBlank()) IconButton(onClick = { vm.add() }) { Icon(Icons.Default.Check, contentDescription = "Add") }
-                            IconButton(onClick = { vm.searchQuery.value = Shopping.parse(vm.input)?.name.orEmpty() }) { Icon(Icons.Default.Search, contentDescription = "Search all lists") }
+                            IconButton(onClick = { vm.searchQuery.value = Shopping.parse(vm.input)?.name.orEmpty() }) { Icon(Icons.Default.Search, contentDescription = "Search everything") }
                         }
                     },
                 )

@@ -35,6 +35,8 @@ class SmartNotesApp : Application() {
     val todos by lazy { TodoRepository(database.todos(), alarms) }
     /** Deleted notes, tasks and shopping lists, kept for Settings → Recycle bin's time. */
     val bin by lazy { RecycleBin(notes, todos, shopping, settings) }
+    /** The search every section's 🔍 uses: notes, tasks and shopping together. */
+    val everywhere by lazy { io.github.baslawson.smartnotes.ui.Everywhere(notes, todos, shopping, settings.taskSort, appScope) }
 
     val settings by lazy { AppSettings(getSharedPreferences("settings", MODE_PRIVATE)) }
     /** Backups to a file or a folder, and restoring them (Settings → Backup). */
@@ -73,6 +75,8 @@ class SmartNotesApp : Application() {
                 "(API ${android.os.Build.VERSION.SDK_INT}), ${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}"
         )
         Notifications.createChannels(this)
+        // The home-screen widgets follow every change while the app runs.
+        io.github.baslawson.smartnotes.widget.Widgets.keepUpdated(this)
         // Every start sets the alarms again: a force-stop clears them without telling the app. Only alarms still to go
         // off are in the ledger, so this is cheap, and setting one again just replaces it.
         val prefs = getSharedPreferences("app", MODE_PRIVATE)
