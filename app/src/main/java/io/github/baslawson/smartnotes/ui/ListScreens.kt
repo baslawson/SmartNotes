@@ -47,6 +47,17 @@ import androidx.compose.material3.InputChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.activity.compose.BackHandler
+import io.github.baslawson.smartnotes.data.isPast
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
@@ -98,6 +109,8 @@ import io.github.baslawson.smartnotes.reminders.Repeat
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
+import kotlinx.coroutines.delay
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import java.time.LocalTime
 import java.time.ZoneOffset
 
@@ -170,6 +183,8 @@ private fun ListChips(
     selected: Long,
     selection: Selection,
     onSelect: (Long) -> Unit,
+    pastCount: Int,
+    onPast: () -> Unit,
     onAdd: () -> Unit,
 ) {
     val row = rememberLazyListState()
@@ -198,7 +213,99 @@ private fun ListChips(
                 onLongClick = if (canPick) ({ selection.toggle(id) }) else null,
             )
         }
-        if (!selection.active) item { FilterChip(selected = false, onClick = onAdd, label = { Text("+ New date") }) }
+        if (pastCount > 0 && !selection.active) item(key = "past") {
+            FilterChip(selected = false, onClick = onPast, label = { Text("Past ($pastCount)") })
+        }
+        if (!selection.active) item(key = "new") { FilterChip(selected = false, onClick = onAdd, label = { Text("+ New date") }) }
+    }
+}
+
+/** Today's date, moving on at midnight while the screen is open and checked again whenever it comes back into view. */
+@Composable
+private fun rememberToday(): LocalDate {
+    var today by remember { mutableStateOf(LocalDate.now()) }
+    LifecycleResumeEffect(Unit) {
+        today = LocalDate.now()
+        onPauseOrDispose { }
+    }
+    LaunchedEffect(Unit) {
+        // Wakes at midnight (at least hourly, in case the clock or time zone changes meanwhile).
+        while (true) {
+            val now = LocalDateTime.now()
+            delay(java.time.Duration.between(now, now.toLocalDate().plusDays(1).atStartOfDay()).toMillis().coerceIn(1_000, 3_600_000))
+            today = LocalDate.now()
+        }
+    }
+    return today
+}
+
+/** The Past chip: lists whose day has gone, newest first, with what each still has to buy. */
+@Composable
+private fun PastListsDialog(
+    lists: List<ShoppingList>,
+    openCounts: Map<Long, Int>,
+    selected: Long,
+    label: (ShoppingList) -> String,
+    onPick: (Long) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Past lists") },
+        text = {
+            LazyColumn {
+                items(lists, key = { it.id }) { l ->
+                    val left = openCounts[l.id] ?: 0
+                    ListItem(
+                        headlineContent = { Text(label(l), fontWeight = if (l.id == selected) FontWeight.Bold else null) },
+                        supportingContent = { Text(if (left == 0) "Nothing left to buy" else "$left left to buy") },
+                        modifier = Modifier.clickable { onPick(l.id); onDismiss() },
+                        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                    )
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
+    )
+}
+
+/** Search results: matching items grouped under their list (lists in chip order); a tap opens that list. */
+@Composable
+private fun SearchResults(
+    query: String,
+    results: List<ShoppingItem>,
+    lists: List<ShoppingList>,
+    label: (ShoppingList) -> String,
+    onOpen: (Long) -> Unit,
+) {
+    if (query.isBlank()) {
+        Empty("Type to find items in all your lists, past ones too.")
+        return
+    }
+    val byList = results.groupBy { it.listId }
+    val groups = lists.filter { it.id in byList }
+    if (groups.isEmpty()) {
+        Empty("Nothing matches \"${query.trim()}\".")
+        return
+    }
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
+        groups.forEach { l ->
+            item(key = "h:${l.id}") { Header(label(l)) }
+            items(byList.getValue(l.id), key = { it.id }) { item ->
+                Row(
+                    Modifier.fillMaxWidth().clickable { onOpen(l.id) }.padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        item.name, Modifier.weight(1f),
+                        textDecoration = if (item.checked) TextDecoration.LineThrough else null,
+                        color = if (item.checked) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+                    )
+                    if (item.checked) Text("ticked", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(end = 8.dp))
+                    if (item.quantity.isNotEmpty()) Text(item.quantity, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                }
+            }
+        }
     }
 }
 
@@ -482,19 +589,48 @@ fun ShoppingScreen(vm: ShoppingViewModel, setting: ReminderSound, onBack: () -> 
     val open = Sorting.items(state.items.filter { !it.checked }, itemSort)
     val checked = state.items.filter { it.checked }
     val selection = vm.selection
-    val pickable = state.lists.filter { it.id != 1L }.map { it.id }
+    val today = rememberToday()
+    // Past lists live under the Past chip; the chips show Anytime, today and coming days (and a past list while open).
+    val (pastLists, currentLists) = state.lists.partition { it.isPast(today) }
+    val chipLists = Sorting.lists(currentLists, listSort, today) + listOfNotNull(pastLists.firstOrNull { it.id == listId })
+    // Only chips on screen can be selected: Select all never picks past lists hidden under Past.
+    val pickable = chipLists.filter { it.id != 1L }.map { it.id }
+    var showPast by rememberSaveable { mutableStateOf(false) }
+    val openCounts by vm.openCounts.collectAsStateWithLifecycle()
+    val query by vm.searchQuery.collectAsStateWithLifecycle()
+    val results by vm.searchResults.collectAsStateWithLifecycle()
+    val searchFocus = remember { FocusRequester() }
+    BackHandler(enabled = query != null) { vm.searchQuery.value = null }
 
-    LaunchedEffect(state.lists) { if (state.loaded) selection.keepOnly(pickable) }
+    LaunchedEffect(pickable) { if (state.loaded) selection.keepOnly(pickable) }
 
     Scaffold(
         topBar = {
             if (selection.active) SelectionBar(selection, pickable) {
                 IconButton(onClick = vm::deleteSelected) { Icon(Icons.Default.Delete, contentDescription = "Delete lists") }
-            } else TopAppBar(
+            } else if (query != null) TopAppBar(
+                title = {
+                    TextField(
+                        value = query.orEmpty(), onValueChange = { vm.searchQuery.value = it },
+                        modifier = Modifier.fillMaxWidth().focusRequester(searchFocus),
+                        placeholder = { Text("Search all lists") }, singleLine = true,
+                        colors = TextFieldDefaults.colors(
+                            focusedContainerColor = Color.Transparent, unfocusedContainerColor = Color.Transparent,
+                        ),
+                        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Search),
+                    )
+                    LaunchedEffect(Unit) { searchFocus.requestFocus() }
+                },
+                navigationIcon = { IconButton(onClick = { vm.searchQuery.value = null }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Close search") } },
+                actions = {
+                    if (!query.isNullOrEmpty()) IconButton(onClick = { vm.searchQuery.value = "" }) { Icon(Icons.Default.Clear, contentDescription = "Clear search") }
+                },
+            ) else TopAppBar(
                 title = { Text(list?.title(style) ?: "Shopping") },
                 navigationIcon = { BackButton(onBack) },
                 actions = {
                     if (checked.isNotEmpty()) TextButton(onClick = { vm.clearChecked() }) { Text("Clear ticked") }
+                    IconButton(onClick = { vm.searchQuery.value = "" }) { Icon(Icons.Default.Search, contentDescription = "Search all lists") }
                     SortButton(
                         SortGroup("Items", ItemSort.entries, itemSort, { it.label }, vm::setItemSort),
                         SortGroup("Lists", ListSort.entries, listSort, { it.label }, vm::setListSort),
@@ -509,8 +645,17 @@ fun ShoppingScreen(vm: ShoppingViewModel, setting: ReminderSound, onBack: () -> 
         },
         bottomBar = bottomBar,
     ) { padding ->
+        if (query != null) {
+            Box(Modifier.padding(padding).fillMaxSize()) {
+                SearchResults(query.orEmpty(), results, orderLists(state.lists, today), { it.label(style) }) { id ->
+                    vm.select(id)
+                    vm.searchQuery.value = null
+                }
+            }
+            return@Scaffold
+        }
         Column(Modifier.padding(padding).fillMaxSize()) {
-            ListChips(Sorting.lists(state.lists, listSort, LocalDate.now()).map { it.id to it.label(style) }, listId, selection, vm::select) { pickNew = true }
+            ListChips(chipLists.map { it.id to it.label(style) }, listId, selection, vm::select, pastLists.size, { showPast = true }) { pickNew = true }
             if (selection.active) {
                 Text("Tap lists to select them. Anytime always stays.", style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
@@ -596,8 +741,11 @@ fun ShoppingScreen(vm: ShoppingViewModel, setting: ReminderSound, onBack: () -> 
             onSave = { vm.saveList(it) }, onDelete = { vm.deleteList(it) }, onDismiss = { editingId = null },
         )
     }
+    if (showPast) PastListsDialog(
+        orderLists(pastLists, today), openCounts, listId, { it.label(style) }, vm::select,
+    ) { showPast = false }
     if (arrangeLists) ArrangeListsDialog(
-        Sorting.lists(state.lists, listSort, LocalDate.now()), listSort == ListSort.MINE, { it.label(style) }, vm::arrangeLists,
+        Sorting.lists(currentLists, listSort, today), listSort == ListSort.MINE, { it.label(style) }, vm::arrangeLists,
     ) { arrangeLists = false }
     if (pickNew) DatePickDialog(null, onPick = { vm.openDate(it) }, onDismiss = { pickNew = false })
     if (vm.dateTaken) {

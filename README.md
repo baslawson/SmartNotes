@@ -32,8 +32,10 @@ Dates show as Today / Tomorrow or in Settings → Date format; the top bar shows
 date. Type `2x milk`, `milk 2L` or `eggs x12`: the quantity shows apart from the name. Past items are suggested while
 typing (✕ forgets one), and an item already on the list isn't added twice. The reminder lists what is still to buy.
 Shopping opens on the list you looked at last; the first time, or if that list is gone, on today's (made if needed).
-The lists run Anytime, Today, then the days to come, then past days (newest first), and the row scrolls to the list
-shown. A past list with nothing left to buy (empty or all ticked) goes to the recycle bin by itself when Shopping is
+The chips run Anytime, Today, then the days to come, and the row scrolls to the list shown. Lists whose day has gone
+are under the *Past (n)* chip: it lists them newest first with what each still has to buy, and a tap opens one (its
+chip shows while it is open). The 🔍 in the top bar searches the items of every list in use, past ones too (not the
+recycle bin); results are grouped by list, ticked ones marked, and a tap opens that list. A past list with nothing left to buy (empty or all ticked) goes to the recycle bin by itself when Shopping is
 opened; one with things still to buy stays, and so does the list on screen. A list made for a
 past day afterwards, or brought back from the bin, is kept.
 
@@ -52,7 +54,7 @@ The sort button (three lines) on Notes, Tasks and Shopping picks the order, reme
 | Notes | Last edited, Created, Title A–Z, My order | pinned notes stay on top |
 | Tasks | Priority, Due date (a date without a time counts as 9:00), Newest, A–Z, My order | done tasks stay below |
 | Shopping items | Added, A–Z, My order | ticked items stay below |
-| Shopping lists | By date (Anytime, today and coming days, then past ones), My order | — |
+| Shopping lists | By date (Anytime, today, then coming days), My order | past lists are under *Past*, newest first |
 
 Each row has a handle (≡): drag it to move the row (pinned notes among the pinned). Dropping it makes the order you
 see, with that move, *My order*, and the sort switches to it. Choosing My order from the menu the first time starts

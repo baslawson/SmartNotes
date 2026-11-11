@@ -46,6 +46,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
@@ -669,7 +671,9 @@ class ShoppingViewModel(
     /** Arrange lists: every list in its new order, which becomes My order. */
     fun arrangeLists(ids: List<Long>) {
         settings.setArranged("lists")
-        appScope.launch { repo.arrangeLists(ids); settings.setListSort(ListSort.MINE) }
+        // Lists not in the dialog (past ones) go after, so no two lists share a place.
+        val all = ids + state.value.lists.map { it.id }.filter { it !in ids }
+        appScope.launch { repo.arrangeLists(all); settings.setListSort(ListSort.MINE) }
     }
 
     /** The list shown: the one asked for (a reminder), else the last one looked at; 0 = none yet (today's opens). */
@@ -686,6 +690,19 @@ class ShoppingViewModel(
     ) { lists, items, history ->
         ShoppingState(lists, items, history.map(ShoppingHistory::toPast), loaded = true)
     }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SHARING, ShoppingState())
+
+    /** List id → items still to buy (for the past lists' "2 left"). */
+    val openCounts: StateFlow<Map<Long, Int>> = repo.observeOpenCounts().stateIn(viewModelScope, SHARING, emptyMap())
+
+    /** The search box's text; null while search is closed. */
+    val searchQuery = MutableStateFlow<String?>(null)
+
+    /** Items in every list in use (past ones too) matching the search; empty until something is typed. */
+    val searchResults: StateFlow<List<ShoppingItem>> = searchQuery
+        .map { it?.trim().orEmpty() }
+        .distinctUntilChanged()
+        .flatMapLatest { q -> if (q.isEmpty()) flowOf(emptyList()) else repo.search(q) }
+        .stateIn(viewModelScope, SHARING, emptyList())
 
     fun select(id: Long) {
         listId.value = id

@@ -5,6 +5,7 @@ import io.github.baslawson.smartnotes.parse.Shopping
 import io.github.baslawson.smartnotes.reminders.AlarmPlanner
 import io.github.baslawson.smartnotes.reminders.AlarmScheduler
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.time.Clock
@@ -24,6 +25,10 @@ class ShoppingRepository(
     fun observeLists(): Flow<List<ShoppingList>> = dao.observeLists()
     fun observeItems(listId: Long): Flow<List<ShoppingItem>> = dao.observeItems(listId)
     fun observeHistory(): Flow<List<ShoppingHistory>> = dao.observeHistory()
+    /** List id → items still to buy. */
+    fun observeOpenCounts(): Flow<Map<Long, Int>> = dao.observeOpenCounts().map { rows -> rows.associate { it.listId to it.open } }
+    /** Items in any list in use (past ones too) whose name contains [text], ignoring capitals. */
+    fun search(text: String): Flow<List<ShoppingItem>> = dao.search(likeEscaped(Shopping.key(text)))
 
     /**
      * Adds "2x milk" to [listId] as milk, quantity 2x. An item already on that list isn't added twice: it is unticked
@@ -193,6 +198,13 @@ fun orderLists(lists: List<ShoppingList>, today: LocalDate): List<ShoppingList> 
     val past = dated.filter { it.second?.isBefore(today) == true }.sortedWith(compareByDescending<Pair<ShoppingList, LocalDate?>> { it.second }.thenBy { it.first.id }).map { it.first }
     return undated + coming + past
 }
+
+/** [text] for a LIKE pattern: its own % and _ (and the escape \) match only themselves. */
+fun likeEscaped(text: String): String = text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+/** A dated list whose day is before [today] (shown under the Past chip). */
+fun ShoppingList.isPast(today: LocalDate): Boolean =
+    date?.let { runCatching { LocalDate.parse(it) }.getOrNull() }?.isBefore(today) == true
 
 /** A shopping list's reminder time: none without a date and time, or when it is in the recycle bin. */
 fun ShoppingList.reminderTime(): LocalDateTime? = if (deletedAt != null) null else AlarmPlanner.listTime(date, remindAt)

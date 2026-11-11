@@ -32,4 +32,19 @@ class ShoppingListsTest {
         )
         assertEquals(listOf(2L, 7L), listsToTidy(lists, today, withOpenItems = setOf(3L), zone = zone))
     }
+
+    @Test fun pastMeansADayBeforeToday() {
+        assertEquals(true, list(2, "2026-11-10").isPast(today))
+        assertEquals(false, list(3, "2026-11-11").isPast(today))
+        assertEquals(false, list(4, "2026-11-12").isPast(today))
+        assertEquals(false, list(1, null).isPast(today))
+        assertEquals(false, list(5, "not a date").isPast(today))
+    }
+
+    @Test fun searchTextMatchesOnlyItselfInLike() {
+        assertEquals("milk", likeEscaped("milk"))
+        assertEquals("50\\%", likeEscaped("50%"))
+        assertEquals("a\\_b", likeEscaped("a_b"))
+        assertEquals("c\\\\d", likeEscaped("c\\d"))
+    }
 }

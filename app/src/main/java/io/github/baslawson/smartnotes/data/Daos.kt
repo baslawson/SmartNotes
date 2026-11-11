@@ -169,6 +169,18 @@ interface ShoppingDao {
 
     // ---------- My order ----------
 
+    /** How many items each list still has to buy (lists with none aren't in it). */
+    @Query("SELECT listId, COUNT(*) AS open FROM shopping_items WHERE NOT checked GROUP BY listId")
+    fun observeOpenCounts(): Flow<List<OpenCount>>
+
+    /** Items in lists in use whose key (the lowercased name) contains [pattern] (% and _ escaped with \). */
+    @Query(
+        "SELECT i.* FROM shopping_items i JOIN shopping_lists l ON l.id = i.listId " +
+            "WHERE l.deletedAt IS NULL AND i.key LIKE '%' || :pattern || '%' ESCAPE '\\' " +
+            "ORDER BY i.checked, i.name COLLATE NOCASE"
+    )
+    fun search(pattern: String): Flow<List<ShoppingItem>>
+
     /** Ticks or unticks just that (not the rest of the row, which may have changed meanwhile: its place, say). */
     @Query("UPDATE shopping_items SET checked = :checked, checkedAt = :checkedAt WHERE id = :id")
     suspend fun setChecked(id: Long, checked: Boolean, checkedAt: Long)
@@ -270,3 +282,6 @@ interface AlarmDao {
     @Query("DELETE FROM alarms")
     suspend fun deleteAll()
 }
+
+/** A list's number of items still to buy. */
+data class OpenCount(val listId: Long, val open: Int)
