@@ -14,6 +14,22 @@ object NoteParser {
     private val LINK = Regex("""\[\[([^\[\]\n|]+)(?:\|[^\[\]\n]*)?]]""")
     private val TASK = Regex("""^(\s*[-*+]\s\[)([ xX])(].*)$""")
 
+    private val LINK_SHOWN = Regex("""\[\[([^\[\]\n|]+)(?:\|([^\[\]\n]*))?]]""")
+
+    /**
+     * [text] as it reads in a list (display only: the note keeps its text): checkbox lines as ☐ / ☑, links as their
+     * shown text (or title), and #tags left out (they're listed under the note). Only what this parser recognises
+     * changes, so "Order #123" or "C#" stay as written.
+     */
+    fun readable(text: String): String = text.lines().joinToString("\n") { line ->
+        val task = TASK.matchEntire(line)
+        val body = if (task == null) line
+        else (if (task.groupValues[2] == " ") "☐ " else "☑ ") + task.groupValues[3].drop(1).trimStart()
+        // Tags first, on the text as written (as tags() reads it), then links.
+        body.replace(TAG) { m -> if (m.groupValues[1].any { it.isLetter() }) "" else m.value }
+            .replace(LINK_SHOWN) { m -> m.groupValues[2].trim().ifEmpty { m.groupValues[1].trim() } }
+    }
+
     fun tags(text: String): Set<String> =
         TAG.findAll(text)
             .map { it.groupValues[1].trimEnd('-', '/').lowercase() }

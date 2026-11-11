@@ -41,6 +41,15 @@ twice. A past list with nothing left to buy (empty or all ticked) goes to the re
 opened; one with things still to buy stays, and so does the list on screen. A list made for a
 past day afterwards, or brought back from the bin, is kept.
 
+## Look and feel
+
+SmartNotes has its own colours, the same on every phone, light or dark (Settings → Appearance): warm paper, with
+amber for Notes, teal for Tasks and coral for Shopping. Text is in Nunito. Notes, tasks and items sit on soft cards.
+Ticking something springs and gives a small buzz (the phone's touch-feedback setting applies); ticking off the last
+task or the last thing to buy sets off a little confetti. Tasks and Shopping show how far along you are ("2 of 5
+done"). Each tab has a one-time tip; *Got it* hides it for good (kept on the phone only). Note previews show
+checklists as ☐ / ☑ and links by their title, without the #tags (they're listed under the note).
+
 ## Where you left off
 
 The app opens where it was left: the same tab, or the note or task that was open (Back goes to its list), with the
@@ -139,6 +148,9 @@ Needs JDK 17+ and the Android SDK (platform 36). `local.properties` holds `sdk.d
 ./gradlew assembleDebug        # app/build/outputs/apk/debug/app-debug.apk
 ./gradlew testDebugUnitTest    # JVM tests: parsing, search, shopping, log file, updates, settings
 ./gradlew lintDebug
+./gradlew testDebugUnitTest --tests '*ScreenshotTest*'
+                               # draws the real screens with sample data (Robolectric), light and dark,
+                               # to app/build/screenshots/*.png: for looking at a design change, not compared
 ./gradlew assembleRelease      # signed when keystore.properties exists (git-ignored):
                                # storeFile=…, storePassword=…, keyAlias=…, keyPassword=…
 ```
@@ -173,3 +185,6 @@ app/schemas/   Room schema per database version (for migrations)
 
 Copyright (C) 2026 baslawson. SmartNotes is free software, licensed under the GNU General Public License,
 version 3 only (GPL-3.0-only). The full text is in [LICENSE](LICENSE). It comes with no warranty.
+
+The Nunito font (app/src/main/res/font) is by the Nunito Project Authors, under the SIL Open Font License 1.1
+([licenses/Nunito-OFL.txt](licenses/Nunito-OFL.txt)).

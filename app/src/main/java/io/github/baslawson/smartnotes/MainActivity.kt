@@ -22,15 +22,17 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Text
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.navigation.NavController
 import androidx.compose.runtime.DisposableEffect
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import io.github.baslawson.smartnotes.ui.Accent
+import io.github.baslawson.smartnotes.ui.AccentTheme
+import io.github.baslawson.smartnotes.ui.LocalDark
+import io.github.baslawson.smartnotes.ui.SmartShapes
+import io.github.baslawson.smartnotes.ui.SmartTypography
+import io.github.baslawson.smartnotes.ui.smartColors
 import io.github.baslawson.smartnotes.ui.RecycleBinScreen
 import io.github.baslawson.smartnotes.ui.BinViewModel
 import kotlinx.coroutines.flow.collectLatest
@@ -62,6 +64,11 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
@@ -223,31 +230,38 @@ private fun AppNavHost(nav: NavHostController, app: SmartNotesApp) {
     val open: (Long) -> Unit = { nav.navigate(noteRoute(it)) }
     // Back on every screen but Notes: to wherever you came from (from a tab, that is Notes).
     val back: () -> Unit = { if (!nav.popBackStack()) nav.navigate(NOTES) }
-    NavHost(nav, startDestination = NOTES) {
-        composable(NOTES) {
+    // Screens fade in and rise a little; going back, they fade and sink.
+    NavHost(
+        nav, startDestination = NOTES,
+        enterTransition = { fadeIn(tween(220)) + slideInVertically(tween(220)) { it / 24 } },
+        exitTransition = { fadeOut(tween(150)) },
+        popEnterTransition = { fadeIn(tween(220)) },
+        popExitTransition = { fadeOut(tween(150)) + slideOutVertically(tween(150)) { it / 24 } },
+    ) {
+        composable(NOTES) { AccentTheme(Accent.NOTES) {
             val vm = viewModel { NotesViewModel(app.notes, app.bin, app.appScope, app.state, app.settings) }
             NotesScreen(
                 vm, onOpen = open, onNew = { nav.navigate(noteRoute(0)) },
                 onSettings = { nav.navigate(SETTINGS) }, onBin = { nav.navigate(BIN) }, bottomBar = bottomBar,
             )
-        }
-        composable(TASKS) {
+        } }
+        composable(TASKS) { AccentTheme(Accent.TASKS) {
             val vm = viewModel { TodoViewModel(app.todos, app.bin, app.appScope, app.settings) }
             TasksScreen(vm, onOpen = { nav.navigate("todo/$it") }, onBack = back, bottomBar = bottomBar)
-        }
+        } }
         composable(SHOPPING_ROUTE, arguments = listOf(navArgument("list") { type = NavType.LongType; defaultValue = 0L })) { entry ->
             val start = entry.arguments?.getLong("list") ?: 0L
             val vm = viewModel { ShoppingViewModel(app.shopping, app.bin, app.appScope, app.getSharedPreferences("lists", android.content.Context.MODE_PRIVATE), start, app.settings) }
             // Opened again for another list (from a reminder): show that one.
             LaunchedEffect(start) { if (start > 0) vm.select(start) }
             val setting by app.settings.reminderSound.collectAsStateWithLifecycle()
-            ShoppingScreen(vm, setting, onBack = back, bottomBar = bottomBar)
+            AccentTheme(Accent.SHOPPING) { ShoppingScreen(vm, setting, onBack = back, bottomBar = bottomBar) }
         }
         composable(TODO, arguments = listOf(navArgument("id") { type = NavType.LongType })) { entry ->
             val id = entry.arguments?.getLong("id") ?: 0L
             val vm = viewModel { TodoEditorViewModel(app.todos, app.bin, app.appScope, id, app.backups.restores) }
             val setting by app.settings.reminderSound.collectAsStateWithLifecycle()
-            TodoEditorScreen(vm, setting, onBack = back)
+            AccentTheme(Accent.TASKS) { TodoEditorScreen(vm, setting, onBack = back) }
         }
         composable(SETTINGS) { SettingsScreen(onBack = back, onBin = { nav.navigate(BIN) }) }
         composable(BIN) {
@@ -264,12 +278,14 @@ private fun AppNavHost(nav: NavHostController, app: SmartNotesApp) {
             val id = entry.arguments?.getLong("id") ?: 0L
             val title = entry.arguments?.getString("title").orEmpty()
             val vm = viewModel { EditorViewModel(app.notes, app.bin, app.appScope, id, title, app.backups.restores) }
-            EditorScreen(
-                vm,
-                onBack = back,
-                onOpen = open,
-                onCreateLinked = { nav.navigate(noteRoute(0, it)) },
-            )
+            AccentTheme(Accent.NOTES) {
+                EditorScreen(
+                    vm,
+                    onBack = back,
+                    onOpen = open,
+                    onCreateLinked = { nav.navigate(noteRoute(0, it)) },
+                )
+            }
         }
     }
 }
@@ -296,7 +312,9 @@ private fun BinSnackbar(app: SmartNotesApp, modifier: Modifier) {
 private fun BottomBar(nav: NavHostController) {
     val current by nav.currentBackStackEntryAsState()
     val route = current?.destination?.route?.substringBefore('?')
-    NavigationBar {
+    // The bar takes the colour of the tab shown.
+    val accent = when (route) { TASKS -> Accent.TASKS; SHOPPING -> Accent.SHOPPING; else -> Accent.NOTES }
+    AccentTheme(accent) { NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceContainer) {
         listOf(
             Triple(NOTES, "Notes", Icons.AutoMirrored.Filled.List),
             Triple(TASKS, "Tasks", Icons.Default.CheckCircle),
@@ -315,7 +333,7 @@ private fun BottomBar(nav: NavHostController) {
                 label = { Text(label) },
             )
         }
-    }
+    } }
 }
 
 /** Reminders need permission to notify on Android 13+; asked once, on first start. */
@@ -343,16 +361,13 @@ private fun SmartNotesTheme(settings: AppSettings, content: @Composable (dark: B
         ThemeMode.LIGHT -> false
         ThemeMode.DARK -> true
     }
-    val context = LocalContext.current
-    val colors = when {
-        Build.VERSION.SDK_INT >= 31 -> if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-        dark -> darkColorScheme()
-        else -> lightColorScheme()
-    }
+    // SmartNotes' own colours (not the wallpaper's); each tab sets its accent (see AccentTheme).
+    val colors = smartColors(dark, Accent.BRAND)
     val density = LocalDensity.current
     val dateStyle by settings.dateStyle.collectAsStateWithLifecycle()
-    MaterialTheme(colorScheme = colors) {
+    MaterialTheme(colorScheme = colors, typography = SmartTypography, shapes = SmartShapes) {
         CompositionLocalProvider(
+            LocalDark provides dark,
             LocalDensity provides Density(density.density, density.fontScale * scale),
             io.github.baslawson.smartnotes.ui.LocalDateStyle provides dateStyle,
         ) {

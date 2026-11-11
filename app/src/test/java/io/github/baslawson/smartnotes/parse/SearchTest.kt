@@ -32,4 +32,14 @@ class SearchTest {
         )
         assertEquals(listOf("a", "c"), Related.rank(setOf("trip"), Related.words("Paris packing"), c))
     }
+
+    @Test fun snippetsReadWithoutMarkup() {
+        assertEquals("Lisbon in May? ☐ book flights ☑ ask Sam", Search.snippet("Lisbon in May?\n- [ ] book flights\n- [x] ask Sam\n#travel", emptyList()))
+        assertEquals("See Holiday ideas and C#", Search.snippet("See [[Holiday ideas]] and C# #todo", emptyList()))
+        // Only what the parser recognises: shown link text, nested tags, + checkboxes; "#123" isn't a tag.
+        assertEquals("the trip, (). Order #123 ☐ pack", Search.snippet("[[Holiday ideas|the trip]], (#idea). Order #123 #home/kitchen\n+ [ ] pack", emptyList()))
+        assertEquals("-[ ] not a box", Search.snippet("-[ ] not a box", emptyList()))
+        assertEquals("See Topic", Search.snippet("See [[Topic]]#work", emptyList()))
+        assertEquals("See #123abc", Search.snippet("See [[Topic|#123]]abc", emptyList()))
+    }
 }

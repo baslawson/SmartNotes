@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
@@ -125,7 +126,6 @@ fun NotesScreen(
                     title = { Text("Notes") },
                     actions = {
                         SortButton(SortGroup(null, NoteSort.entries, sort, { it.label }, vm::setSort))
-                        IconButton(onClick = onSettings) { Icon(Icons.Default.Settings, contentDescription = "Settings") }
                         Box {
                             IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, contentDescription = "More") }
                             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
@@ -134,6 +134,7 @@ fun NotesScreen(
                                     state.rows.firstOrNull()?.let { selection.toggle(it.note.id) }
                                 })
                                 DropdownMenuItem(text = { Text("Recycle bin") }, onClick = { menu = false; onBin() })
+                                DropdownMenuItem(text = { Text("Settings") }, onClick = { menu = false; onSettings() })
                             }
                         }
                     },
@@ -146,10 +147,11 @@ fun NotesScreen(
         },
     ) { padding ->
         Column(Modifier.padding(padding).fillMaxSize()) {
-            OutlinedTextField(
+            TextField(
                 value = query,
                 onValueChange = { vm.query.value = it },
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                shape = PillShape, colors = pillColors(),
                 placeholder = { Text("Search notes") },
                 leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                 trailingIcon = {
@@ -175,10 +177,9 @@ fun NotesScreen(
             }
             when {
                 !state.loaded -> Unit
-                state.rows.isEmpty() -> Empty(
-                    if (query.isBlank() && selectedTag == null) "No notes yet. Tap + to write one."
-                    else "Nothing found."
-                )
+                state.rows.isEmpty() ->
+                    if (query.isBlank() && selectedTag == null) EmptyState(Icons.Default.Edit, "No notes yet", "Tap + to write your first one.")
+                    else EmptyState(Icons.Default.Search, "Nothing found", "Try other words, or another tag.")
                 else -> {
                     val list = rememberLastScroll("notes")
                     val byId = state.rows.associateBy { it.note.id }
@@ -190,18 +191,18 @@ fun NotesScreen(
                         if (a != null && b != null && byId[a]?.note?.pinned == byId[b]?.note?.pinned) order.move(a, b)
                     }
                     LazyColumn(Modifier.fillMaxSize(), list, contentPadding = PaddingValues(bottom = 88.dp)) {
+                        item(key = "tip") {
+                            OneTimeTip("notes", "Write #tags, [[links]] to other notes and - [ ] checklists right in a note. Drag ≡ to reorder; long-press to select.")
+                        }
                         items(order.ids.mapNotNull { byId[it] }, key = { it.note.id }) { row ->
                             ReorderableItem(reorder, key = row.note.id, enabled = canArrange) { dragging ->
-                                Surface(shadowElevation = if (dragging) 6.dp else 0.dp) {
-                                    Column {
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            NoteRowItem(row, state.terms, Modifier.weight(1f).selectable(selection, row.note.id) { onOpen(row.note.id) })
-                                            if (canArrange) DragHandleIcon(
-                                                row.title,
-                                                Modifier.draggableHandle(onDragStarted = { order.start() }, onDragStopped = { order.stop()?.let(vm::arrange) }).padding(12.dp),
-                                            )
-                                        }
-                                        HorizontalDivider()
+                                RowCard(dragging = dragging) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        NoteRowItem(row, state.terms, Modifier.weight(1f).selectable(selection, row.note.id) { onOpen(row.note.id) })
+                                        if (canArrange) DragHandleIcon(
+                                            row.title,
+                                            Modifier.draggableHandle(onDragStarted = { order.start() }, onDragStopped = { order.stop()?.let(vm::arrange) }).padding(12.dp),
+                                        )
                                     }
                                 }
                             }
@@ -215,7 +216,7 @@ fun NotesScreen(
 
 @Composable
 private fun NoteRowItem(row: NoteRow, terms: List<String>, modifier: Modifier) {
-    Column(Modifier.fillMaxWidth().then(modifier).padding(horizontal = 16.dp, vertical = 10.dp)) {
+    Column(Modifier.fillMaxWidth().then(modifier).padding(horizontal = 16.dp, vertical = 12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (row.note.pinned) {
                 Icon(Icons.Default.Star, contentDescription = "Pinned", Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
@@ -332,7 +333,7 @@ private fun NoteInfo(info: EditorInfo, onOpen: (Long) -> Unit, onCreateLinked: (
             info.checklist.forEach { task ->
                 // Only the box ticks (a tap on the text does nothing).
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    androidx.compose.material3.Checkbox(checked = task.done, onCheckedChange = { onTick(task.line, task.text) })
+                    FunCheckbox(checked = task.done, onCheckedChange = { onTick(task.line, task.text) })
                     Text(
                         task.text.ifBlank { "(empty)" },
                         textDecoration = if (task.done) androidx.compose.ui.text.style.TextDecoration.LineThrough else null,

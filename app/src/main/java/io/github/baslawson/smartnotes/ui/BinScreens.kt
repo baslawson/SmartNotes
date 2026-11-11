@@ -210,7 +210,7 @@ fun RecycleBinScreen(vm: BinViewModel, settings: AppSettings, onBack: () -> Unit
             )
             when {
                 entries == null -> Unit
-                all.isEmpty() -> Empty("The recycle bin is empty.")
+                all.isEmpty() -> EmptyState(Icons.Default.Delete, "The recycle bin is empty", "Deleted notes, tasks and lists wait here for a while, in case you want them back.")
                 else -> LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
                     BinKind.entries.forEach { kind ->
                         val those = all.filter { it.kind == kind }

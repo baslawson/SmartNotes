@@ -27,7 +27,7 @@ object Search {
 
     /** A one-line piece of [body] around the first match, or its start when nothing matches. */
     fun snippet(body: String, terms: List<String>, length: Int = 120): String {
-        val flat = body.replace(Regex("""\s+"""), " ").trim()
+        val flat = NoteParser.readable(body).replace(Regex("""\s+"""), " ").trim()
         val first = matches(flat, terms).firstOrNull()?.first ?: 0
         val start = if (first < 30) 0 else (first - 30).let { s -> flat.indexOf(' ', s).takeIf { it in s until first }?.plus(1) ?: s }
         val end = minOf(flat.length, start + length)

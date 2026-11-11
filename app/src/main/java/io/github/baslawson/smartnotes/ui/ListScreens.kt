@@ -52,12 +52,15 @@ import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.ShoppingCart
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.foundation.layout.Box
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.activity.compose.BackHandler
 import io.github.baslawson.smartnotes.data.isPast
+import io.github.baslawson.smartnotes.data.nextDue
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
@@ -96,6 +99,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
@@ -282,13 +286,13 @@ private fun SearchResults(
     onOpen: (Long) -> Unit,
 ) {
     if (query.isBlank()) {
-        Empty("Type to find items in all your lists, past ones too.")
+        EmptyState(Icons.Default.Search, "Search your lists", "Type to find items in all your lists, past ones too.")
         return
     }
     val byList = results.groupBy { it.listId }
     val groups = lists.filter { it.id in byList }
     if (groups.isEmpty()) {
-        Empty("Nothing matches \"${query.trim()}\".")
+        EmptyState(Icons.Default.Search, "Nothing found", "No item matches \"${query.trim()}\".")
         return
     }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
@@ -334,6 +338,7 @@ fun TasksScreen(vm: TodoViewModel, onOpen: (Long) -> Unit, onBack: () -> Unit, b
     LaunchedEffect(shownIds) { if (state.loaded) selection.keepOnly(shownIds) }
     // Handles in every order; a drop switches to My order.
     val canArrange = !selection.active
+    val party = rememberCelebration()
 
     Scaffold(
         topBar = {
@@ -353,21 +358,30 @@ fun TasksScreen(vm: TodoViewModel, onOpen: (Long) -> Unit, onBack: () -> Unit, b
         bottomBar = bottomBar,
     ) { padding ->
         Column(Modifier.padding(padding).fillMaxSize()) {
-            OutlinedTextField(
+            TextField(
                 value = vm.input, onValueChange = { vm.input = it },
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                shape = PillShape, colors = pillColors(),
+                leadingIcon = { Icon(Icons.Default.Add, contentDescription = null) },
                 placeholder = { Text("Add a task") }, singleLine = true,
                 keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Done),
                 keyboardActions = KeyboardActions(onDone = { vm.add() }),
                 trailingIcon = { if (vm.input.isNotBlank()) IconButton(onClick = vm::add) { Icon(Icons.Default.Add, contentDescription = "Add") } },
             )
             if (state.loaded && state.todos.isEmpty()) {
-                Empty("No tasks yet. Type one above; tap it to add details, a priority or a reminder.")
+                EmptyState(Icons.Default.CheckCircle, "No tasks yet", "Type one above. Tap a task to add details, a priority or a reminder.")
                 return@Column
             }
             // Open tasks in the chosen order (see the sort button); ticked ones below, latest first.
             val open = Sorting.tasks(state.todos.filter { !it.done }, sort)
             val done = state.todos.filter { it.done }.sortedByDescending { it.doneAt }
+            ProgressLine(done.size, state.todos.size, "done", Modifier.padding(horizontal = 20.dp, vertical = 6.dp))
+            // Ticking off the last open task: a little party.
+            val tick: (Todo, Boolean) -> Unit = { t, now ->
+                // Not for a repeating task: it comes back with its next date, so there's still something to do.
+                if (now && !t.done && open.size == 1 && nextDue(t) == null) party.fire(Celebration.TASKS.random())
+                vm.setDone(t, now)
+            }
             val list = rememberLastScroll("tasks")
             val byId = open.associateBy { it.id }
             val order = rememberDragOrder(open.map { it.id }, sort == TaskSort.MINE)
@@ -377,11 +391,14 @@ fun TasksScreen(vm: TodoViewModel, onOpen: (Long) -> Unit, onBack: () -> Unit, b
                 if (a != null && b != null) order.move(a, b)
             }
             LazyColumn(Modifier.fillMaxSize(), list, contentPadding = PaddingValues(bottom = 24.dp)) {
+                item(key = "tip") {
+                    OneTimeTip("tasks", "Tap a task to add details, a priority or a reminder. Drag ≡ to reorder; long-press to select.")
+                }
                 items(order.ids.mapNotNull { byId[it] }, key = { "t:${it.id}" }) { t ->
                     ReorderableItem(reorder, key = "t:${t.id}", enabled = canArrange) { dragging ->
-                        Surface(shadowElevation = if (dragging) 6.dp else 0.dp) {
+                        RowCard(dragging = dragging) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                TodoLine(t, onCheck = { vm.setDone(t, it) }, Modifier.weight(1f).selectable(selection, t.id) { onOpen(t.id) })
+                                TodoLine(t, onCheck = { tick(t, it) }, Modifier.weight(1f).selectable(selection, t.id) { onOpen(t.id) })
                                 if (canArrange) DragHandleIcon(t.title, Modifier.draggableHandle(onDragStarted = { order.start() }, onDragStopped = { order.stop()?.let(vm::arrange) }).padding(12.dp))
                             }
                         }
@@ -394,12 +411,15 @@ fun TasksScreen(vm: TodoViewModel, onOpen: (Long) -> Unit, onBack: () -> Unit, b
                         }
                     }
                     if (showDone) items(done, key = { "t:${it.id}" }) { t ->
-                        TodoLine(t, onCheck = { vm.setDone(t, it) }, Modifier.selectable(selection, t.id) { onOpen(t.id) })
+                        RowCard(faded = true) {
+                            TodoLine(t, onCheck = { vm.setDone(t, it) }, Modifier.selectable(selection, t.id) { onOpen(t.id) })
+                        }
                     }
                 }
             }
         }
     }
+    CelebrationOverlay(party)
 }
 
 /** A task's reminder time, when it has one (and isn't done). */
@@ -407,8 +427,8 @@ private fun Todo.reminder(): LocalDateTime? = AlarmPlanner.todoTime(remind, done
 
 @Composable
 private fun TodoLine(t: Todo, onCheck: (Boolean) -> Unit, modifier: Modifier) {
-    Row(Modifier.fillMaxWidth().then(modifier).padding(end = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-        Checkbox(checked = t.done, onCheckedChange = onCheck)
+    Row(Modifier.fillMaxWidth().then(modifier).padding(start = 4.dp, end = 16.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+        FunCheckbox(checked = t.done, onCheckedChange = onCheck)
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (t.priority == 2) Text("! ", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold)
@@ -457,7 +477,7 @@ fun TodoEditorScreen(vm: TodoEditorViewModel, setting: ReminderSound, onBack: ()
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Checkbox(checked = t.done, onCheckedChange = { vm.setDone(it) })
+                FunCheckbox(checked = t.done, onCheckedChange = { vm.setDone(it) })
                 OutlinedTextField(
                     t.title, { v -> vm.update(text = true) { it.copy(title = v) } }, Modifier.weight(1f),
                     label = { Text("Task") },
@@ -594,6 +614,8 @@ fun ShoppingScreen(vm: ShoppingViewModel, setting: ReminderSound, onBack: () -> 
     val listSort by vm.listSort.collectAsStateWithLifecycle()
     var arrangeLists by rememberSaveable { mutableStateOf(false) }
     val showTicked by vm.showTicked.collectAsStateWithLifecycle()
+    // One per list: switching lists ends a party that belongs to the last one.
+    val party = remember(listId) { Celebration() }
     val open = Sorting.items(state.items.filter { !it.checked }, itemSort)
     val checked = state.items.filter { it.checked }
     val selection = vm.selection
@@ -637,10 +659,9 @@ fun ShoppingScreen(vm: ShoppingViewModel, setting: ReminderSound, onBack: () -> 
                     if (!query.isNullOrEmpty()) IconButton(onClick = { vm.searchQuery.value = "" }) { Icon(Icons.Default.Clear, contentDescription = "Clear search") }
                 },
             ) else TopAppBar(
-                title = { Text(list?.title(style) ?: "Shopping") },
+                title = { Text(list?.title(style) ?: "Shopping", maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 navigationIcon = { BackButton(onBack) },
                 actions = {
-                    if (checked.isNotEmpty()) TextButton(onClick = { vm.clearChecked() }) { Text("Clear ticked") }
                     IconButton(onClick = { vm.searchQuery.value = "" }) { Icon(Icons.Default.Search, contentDescription = "Search all lists") }
                     SortButton(
                         SortGroup("Items", ItemSort.entries, itemSort, { it.label }, vm::setItemSort),
@@ -674,18 +695,20 @@ fun ShoppingScreen(vm: ShoppingViewModel, setting: ReminderSound, onBack: () -> 
             list?.let { l ->
                 val date = parseDate(l.date)
                 val time = parseTime(l.remindAt)
-                if (date != null) {
+                if (date != null && time != null) {
                     Text(
-                        "For ${style.dayLabel(date)}" + (time?.let { " · reminder $it (${soundLabel(ReminderSound.of(l.sound), setting)})" } ?: ""),
+                        "⏰ Reminder at $time (${soundLabel(ReminderSound.of(l.sound), setting)})",
                         style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
                     )
                 }
             }
-            OutlinedTextField(
+            TextField(
                 value = vm.input,
                 onValueChange = { vm.input = it },
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                shape = PillShape, colors = pillColors(),
+                leadingIcon = { Icon(Icons.Default.Add, contentDescription = null) },
                 placeholder = { Text("Add item, e.g. 2x milk") },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Done),
@@ -695,6 +718,7 @@ fun ShoppingScreen(vm: ShoppingViewModel, setting: ReminderSound, onBack: () -> 
                     if (vm.input.isNotBlank()) IconButton(onClick = { vm.add() }) { Icon(Icons.Default.Add, contentDescription = "Add") }
                 },
             )
+            ProgressLine(checked.size, state.items.size, "bought", Modifier.padding(horizontal = 20.dp, vertical = 6.dp))
             val suggestions = vm.suggestions(state)
             if (suggestions.isNotEmpty()) {
                 LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -711,7 +735,7 @@ fun ShoppingScreen(vm: ShoppingViewModel, setting: ReminderSound, onBack: () -> 
                 }
             }
             if (state.loaded && state.items.isEmpty()) {
-                Empty("This list is empty. Type an item above.\n\nTap ✎ to give the list a date and a reminder.")
+                EmptyState(Icons.Default.ShoppingCart, "Nothing on this list yet", "Type an item above, like 2x milk.\nTap ✎ to give the list a date and a reminder.")
                 return@Column
             }
             val scroll = rememberLastScroll("shopping:$listId")
@@ -725,10 +749,17 @@ fun ShoppingScreen(vm: ShoppingViewModel, setting: ReminderSound, onBack: () -> 
                 if (a != null && b != null && a in byId && b in byId) order.move(a, b)
             }
             LazyColumn(Modifier.fillMaxSize(), scroll, contentPadding = PaddingValues(bottom = 24.dp)) {
+                item(key = "tip") {
+                    OneTimeTip("shopping", "Tap an item's name to rename it. Things not bought move to today's list by themselves; old lists wait under Past.")
+                }
                 items(order.ids.mapNotNull { byId[it] }, key = { it.id }) { item ->
                     ReorderableItem(reorder, key = item.id, enabled = canArrange) { dragging ->
-                        Surface(shadowElevation = if (dragging) 6.dp else 0.dp) {
-                            ItemLine(item, onCheck = { vm.setChecked(item, it) }, onDelete = { vm.delete(item) }, onEdit = { renamingId = item.id }) {
+                        RowCard(dragging = dragging) {
+                            ItemLine(item, onCheck = { now ->
+                                // Ticking off the last thing to buy: a little party.
+                                if (now && open.size == 1) party.fire(Celebration.SHOPPING.random())
+                                vm.setChecked(item, now)
+                            }, onDelete = { vm.delete(item) }, onEdit = { renamingId = item.id }) {
                                 if (canArrange) DragHandleIcon(item.name, Modifier.draggableHandle(onDragStarted = { order.start() }, onDragStopped = { order.stop()?.let(vm::arrangeItems) }).padding(12.dp))
                             }
                         }
@@ -737,10 +768,14 @@ fun ShoppingScreen(vm: ShoppingViewModel, setting: ReminderSound, onBack: () -> 
                 if (checked.isNotEmpty()) {
                     item(key = "h:basket") {
                         HorizontalDivider(Modifier.padding(top = 8.dp))
-                        CompletedHeader("In the basket (${checked.size})", showTicked, vm::toggleShowTicked)
+                        CompletedHeader("In the basket (${checked.size})", showTicked, vm::toggleShowTicked) {
+                            if (!selection.active) TextButton(onClick = { vm.clearChecked() }) { Text("Clear ticked") }
+                        }
                     }
                     if (showTicked) items(checked, key = { it.id }) { item ->
-                        ItemLine(item, onCheck = { vm.setChecked(item, it) }, onDelete = { vm.delete(item) }, onEdit = { renamingId = item.id })
+                        RowCard(faded = true) {
+                            ItemLine(item, onCheck = { vm.setChecked(item, it) }, onDelete = { vm.delete(item) }, onEdit = { renamingId = item.id })
+                        }
                     }
                 }
             }
@@ -771,6 +806,7 @@ fun ShoppingScreen(vm: ShoppingViewModel, setting: ReminderSound, onBack: () -> 
         )
     }
     if (pickNew) DatePickDialog(null, onPick = { vm.openDate(it) }, onDismiss = { pickNew = false })
+    CelebrationOverlay(party)
     if (vm.dateTaken) {
         AlertDialog(
             onDismissRequest = { vm.dateTaken = false },
@@ -855,10 +891,10 @@ private fun ItemLine(
 ) {
     // Only the box ticks; a tap on the name opens it to rename (no ticking by accident while scrolling or dragging).
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Checkbox(checked = item.checked, onCheckedChange = onCheck)
+        FunCheckbox(checked = item.checked, onCheckedChange = onCheck)
         Text(
             item.name,
-            modifier = Modifier.weight(1f).clickable(onClickLabel = "Rename", onClick = onEdit).padding(vertical = 12.dp),
+            modifier = Modifier.weight(1f).clickable(onClickLabel = "Rename", onClick = onEdit).padding(vertical = 14.dp),
             textDecoration = if (item.checked) TextDecoration.LineThrough else null,
             color = if (item.checked) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
         )

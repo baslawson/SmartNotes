@@ -28,6 +28,13 @@ class AppState(private val prefs: SharedPreferences?) {
         prefs?.edit()?.putInt("$KEY_SCROLL$key", index)?.putInt("$KEY_SCROLL$key:offset", offset)?.apply()
     }
 
+    /** One-time tips: a tip once dismissed ("Got it") isn't shown again. Kept through a restore. */
+    fun tipSeen(tip: String): Boolean = prefs?.getBoolean("$KEY_TIP$tip", false) ?: false
+
+    fun setTipSeen(tip: String) {
+        prefs?.edit()?.putBoolean("$KEY_TIP$tip", true)?.apply()
+    }
+
     /** After a restore the remembered note, task and scroll positions may point at other things: start afresh. */
     fun forgetPlaces() {
         val p = prefs ?: return
@@ -45,6 +52,7 @@ class AppState(private val prefs: SharedPreferences?) {
         private const val KEY_QUERY = "notes_query"
         private const val KEY_TAG = "notes_tag"
         private const val KEY_SCROLL = "scroll:"
+        private const val KEY_TIP = "tip:"
 
         /**
          * The place to remember for a screen ([route] is its navigation pattern, [id] its note or task): a tab, or the

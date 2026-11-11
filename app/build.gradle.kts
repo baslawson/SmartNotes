@@ -16,8 +16,8 @@ android {
         applicationId = "io.github.baslawson.smartnotes"
         minSdk = 26 // java.time works natively from API 26
         targetSdk = 36 // Android 16, as on the Samsung Galaxy S26
-        versionCode = 8
-        versionName = "0.2.6"
+        versionCode = 9
+        versionName = "0.3.0"
     }
 
     // The release key lives outside the repository. keystore.properties (git-ignored) points at it;
@@ -47,6 +47,14 @@ android {
     }
     kotlinOptions { jvmTarget = "17" }
     buildFeatures { compose = true }
+    // Screenshot tests run on Robolectric, which needs the app's resources.
+    testOptions {
+        unitTests {
+            isIncludeAndroidResources = true
+            // Screenshots are always saved (to look at), never compared.
+            all { it.systemProperty("roborazzi.test.record", "true") }
+        }
+    }
 }
 
 // The database schema of each version is kept in app/schemas, so later versions can write and test migrations.
@@ -77,4 +85,9 @@ dependencies {
     // Plain JVM tests (app/src/test): note parsing, search, shopping list, the log file and updates.
     testImplementation(libs.junit)
     testImplementation(libs.org.json)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.roborazzi)
+    testImplementation(libs.roborazzi.compose)
+    testImplementation(platform(libs.androidx.compose.bom))
+    testImplementation(libs.androidx.compose.ui.test.junit4)
 }
