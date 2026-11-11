@@ -4,8 +4,11 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.onLast
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.performClick
@@ -97,6 +100,18 @@ class ScreenshotTest {
         val ahead = LocalDate.now().plusDays(3)
         compose.onNodeWithContentDescription(io.github.baslawson.smartnotes.DateStyle.SHORT.format(ahead), substring = true).performClick()
         shot("light-7-empty-day", "Nothing planned yet")
+        // Tap the month for a month calendar.
+        compose.onNodeWithText(io.github.baslawson.smartnotes.data.Week.monthLabel(
+            io.github.baslawson.smartnotes.data.Week.start(ahead, io.github.baslawson.smartnotes.data.Week.firstDay()))).performClick()
+        compose.waitUntil(10_000) { compose.onAllNodesWithContentDescription("Previous month").fetchSemanticsNodes().isNotEmpty() }
+        shot("light-7b-month")
+        compose.onAllNodesWithText("Go to today").onLast().performClick()
+        compose.waitForIdle()
+        // Tasks: 🔍 in the add box searches all tasks, done ones too.
+        compose.onNodeWithText("Tasks").performClick()
+        compose.onNodeWithContentDescription("Search tasks").performClick()
+        compose.onNode(hasSetTextAction()).performTextInput("the")
+        shot("light-8-task-search", "Water the plants")
     }
 
     @Test fun dark() {

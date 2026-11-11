@@ -474,8 +474,22 @@ class TodoViewModel(
     }
 
     fun setDone(todo: Todo, done: Boolean) = appScope.launch { repo.setDone(todo.id, done) }
+
+    /** The search box's text; null while search is closed. */
+    val searchQuery = MutableStateFlow<String?>(null)
+
     /** Moves the ticked tasks to the recycle bin. */
     fun clearDone() = appScope.launch { bin.trash(BinKind.TASK, repo.doneIds()) }
+}
+
+/**
+ * Tasks search: the tasks whose title and details hold every word of [query] (each as the start of a word, capitals
+ * ignored): open ones first in [sort]'s order, then done ones, latest done first.
+ */
+fun searchTasks(todos: List<Todo>, query: String, sort: TaskSort): List<Todo> {
+    val terms = Search.terms(query, limit = Int.MAX_VALUE)
+    val found = todos.filter { Search.matchesAll(it.title + "\n" + it.details, terms) }
+    return Sorting.tasks(found.filter { !it.done }, sort) + found.filter { it.done }.sortedByDescending { it.doneAt }
 }
 
 /** Edits one to-do task; every change is saved straight away (text after a short pause). */

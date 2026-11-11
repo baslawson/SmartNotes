@@ -98,6 +98,9 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.draw.clip
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -108,6 +111,9 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.disabled
@@ -138,8 +144,10 @@ import androidx.compose.ui.window.PopupProperties
 import androidx.compose.runtime.mutableIntStateOf
 import io.github.baslawson.smartnotes.parse.PastItem
 import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.input.TextFieldValue
 import io.github.baslawson.smartnotes.parse.Shopping
+import io.github.baslawson.smartnotes.parse.Search
 import kotlinx.coroutines.delay
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import java.time.LocalTime
@@ -295,6 +303,8 @@ fun TasksScreen(vm: TodoViewModel, onOpen: (Long) -> Unit, onBack: () -> Unit, b
     // Handles in every order; a drop switches to My order.
     val canArrange = !selection.active
     val party = rememberCelebration()
+    val query by vm.searchQuery.collectAsStateWithLifecycle()
+    BackHandler(enabled = query != null) { vm.searchQuery.value = null }
 
     Scaffold(
         topBar = {
@@ -302,7 +312,8 @@ fun TasksScreen(vm: TodoViewModel, onOpen: (Long) -> Unit, onBack: () -> Unit, b
                 SelectionBar(selection, shownIds) {
                     IconButton(onClick = vm::deleteSelected) { Icon(Icons.Default.Delete, contentDescription = "Delete") }
                 }
-            } else TopAppBar(
+            } else if (query != null) SearchTopBar(query.orEmpty(), "Search tasks", { vm.searchQuery.value = it }) { vm.searchQuery.value = null }
+            else TopAppBar(
                 title = { Text("Tasks") }, navigationIcon = { BackButton(onBack) },
                 actions = {
                     SortButton(SortGroup(null, TaskSort.entries, sort, { it.label }, vm::setSort)) { close ->
@@ -313,6 +324,19 @@ fun TasksScreen(vm: TodoViewModel, onOpen: (Long) -> Unit, onBack: () -> Unit, b
         },
         bottomBar = bottomBar,
     ) { padding ->
+        if (query != null) {
+            Box(Modifier.padding(padding).fillMaxSize()) {
+                // Ticking off the last open task from here celebrates too (as in the list).
+                val onCheck: (Todo, Boolean) -> Unit = { t, now ->
+                    if (now && !t.done && state.todos.count { !it.done } == 1 && nextDue(t) == null) party.fire(Celebration.TASKS.random())
+                    vm.setDone(t, now)
+                }
+                TaskResults(query.orEmpty(), searchTasks(state.todos, query.orEmpty(), sort), onCheck) { id ->
+                    onOpen(id)
+                }
+            }
+            return@Scaffold
+        }
         Column(Modifier.padding(padding).fillMaxSize()) {
             TextField(
                 value = vm.input, onValueChange = { vm.input = it },
@@ -322,7 +346,13 @@ fun TasksScreen(vm: TodoViewModel, onOpen: (Long) -> Unit, onBack: () -> Unit, b
                 placeholder = { Text("Add a task") }, singleLine = true,
                 keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Done),
                 keyboardActions = KeyboardActions(onDone = { vm.add() }),
-                trailingIcon = { if (vm.input.isNotBlank()) IconButton(onClick = vm::add) { Icon(Icons.Default.Add, contentDescription = "Add") } },
+                // On the right: add what is typed, and search all tasks (for what is typed, if anything).
+                trailingIcon = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (vm.input.isNotBlank()) IconButton(onClick = vm::add) { Icon(Icons.Default.Check, contentDescription = "Add") }
+                        IconButton(onClick = { selection.clear(); vm.searchQuery.value = vm.input.trim() }) { Icon(Icons.Default.Search, contentDescription = "Search tasks") }
+                    }
+                },
             )
             if (state.loaded && state.todos.isEmpty()) {
                 EmptyState(Icons.Default.CheckCircle, "No tasks yet", "Type one above. Tap a task to add details, a priority or a reminder.")
@@ -378,29 +408,91 @@ fun TasksScreen(vm: TodoViewModel, onOpen: (Long) -> Unit, onBack: () -> Unit, b
     CelebrationOverlay(party)
 }
 
+/**
+ * The top bar while searching (Tasks and Shopping): the field, ← to close, ✕ to clear. The cursor starts after any
+ * prefilled text; the keyboard comes up when the search opens (not again on coming back to it), and its Search key hides it.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SearchTopBar(query: String, placeholder: String, onChange: (String) -> Unit, onClose: () -> Unit) {
+    var field by remember { mutableStateOf(TextFieldValue(query, TextRange(query.length))) }
+    // The query can change from outside (✕): then put the cursor at its end.
+    val value = if (field.text == query) field else TextFieldValue(query, TextRange(query.length))
+    val focus = remember { FocusRequester() }
+    val focusManager = LocalFocusManager.current
+    var focused by rememberSaveable { mutableStateOf(false) }
+    TopAppBar(
+        title = {
+            TextField(
+                value = value, onValueChange = { field = it; if (it.text != query) onChange(it.text) },
+                modifier = Modifier.fillMaxWidth().focusRequester(focus),
+                placeholder = { Text(placeholder) }, singleLine = true,
+                colors = TextFieldDefaults.colors(focusedContainerColor = Color.Transparent, unfocusedContainerColor = Color.Transparent),
+                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Search),
+                keyboardActions = KeyboardActions(onSearch = { focusManager.clearFocus() }),
+            )
+            LaunchedEffect(Unit) { if (!focused) { focused = true; focus.requestFocus() } }
+        },
+        navigationIcon = { IconButton(onClick = onClose) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Close search") } },
+        actions = {
+            if (query.isNotEmpty()) IconButton(onClick = { onChange("") }) { Icon(Icons.Default.Clear, contentDescription = "Clear search") }
+        },
+    )
+}
+
+/** Tasks search results: matching tasks (open first, then done), the matches highlighted; a tap opens one. */
+@Composable
+private fun TaskResults(query: String, results: List<Todo>, onCheck: (Todo, Boolean) -> Unit, onOpen: (Long) -> Unit) {
+    if (query.isBlank()) {
+        EmptyState(Icons.Default.Search, "Search your tasks", "Type to find tasks by their title or details, done ones too.")
+        return
+    }
+    if (results.isEmpty()) {
+        EmptyState(Icons.Default.Search, "Nothing found", "No task matches \"${query.trim()}\".")
+        return
+    }
+    val terms = Search.terms(query, limit = Int.MAX_VALUE)
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
+        items(results, key = { it.id }) { t ->
+            RowCard(faded = t.done) {
+                TodoLine(t, onCheck = { onCheck(t, it) }, Modifier.clickable { onOpen(t.id) }, terms)
+            }
+        }
+    }
+}
+
 /** A task's reminder time, when it has one (and isn't done). */
 private fun Todo.reminder(): LocalDateTime? = AlarmPlanner.todoTime(remind, done, dueDate, dueTime)
 
 @Composable
-private fun TodoLine(t: Todo, onCheck: (Boolean) -> Unit, modifier: Modifier) {
+private fun TodoLine(t: Todo, onCheck: (Boolean) -> Unit, modifier: Modifier, terms: List<String> = emptyList()) {
     Row(Modifier.fillMaxWidth().then(modifier).padding(start = 4.dp, end = 16.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
         FunCheckbox(checked = t.done, onCheckedChange = onCheck)
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (t.priority == 2) Text("! ", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold)
                 Text(
-                    t.title,
+                    highlighted(t.title, terms),
                     textDecoration = if (t.done) TextDecoration.LineThrough else null,
                     color = if (t.priority == 0 || t.done) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
                 )
             }
             val style = LocalDateStyle.current
-            val details = buildList {
-                t.reminder()?.let { at -> add("⏰ ${style.dayLabel(at.toLocalDate())} ${at.toLocalTime()}" + if (Repeat.of(t.repeat) != Repeat.NONE) " ↻" else "") }
-                t.details.lineSequence().firstOrNull { it.isNotBlank() }?.let { add(it.take(60)) }
-            }
-            if (details.isNotEmpty()) {
-                Text(details.joinToString("  ·  "), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            val reminder = t.reminder()?.let { at -> "⏰ ${style.dayLabel(at.toLocalDate())} ${at.toLocalTime()}" + if (Repeat.of(t.repeat) != Repeat.NONE) " ↻" else "" }
+            // Searching: the part of the details with the match (as typed); otherwise their first line.
+            val about = if (terms.isNotEmpty() && Search.matches(t.details, terms).isNotEmpty()) Search.snippet(t.details, terms, 60, readable = false)
+                else t.details.lineSequence().firstOrNull { it.isNotBlank() }?.take(60)
+            // Only the details are highlighted: "Today" in the reminder isn't a match.
+            val aboutText = about?.let { highlighted(it, terms) }
+            if (reminder != null || aboutText != null) {
+                Text(
+                    buildAnnotatedString {
+                        reminder?.let { append(it) }
+                        if (reminder != null && aboutText != null) append("  ·  ")
+                        aboutText?.let { append(it) }
+                    },
+                    style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
     }
@@ -597,7 +689,6 @@ fun ShoppingScreen(vm: ShoppingViewModel, setting: ReminderSound, onBack: () -> 
     val anytimeCount = openCounts[1L] ?: 0
     val query by vm.searchQuery.collectAsStateWithLifecycle()
     val results by vm.searchResults.collectAsStateWithLifecycle()
-    val searchFocus = remember { FocusRequester() }
     BackHandler(enabled = query != null) { vm.searchQuery.value = null }
 
     Scaffold(
@@ -605,24 +696,8 @@ fun ShoppingScreen(vm: ShoppingViewModel, setting: ReminderSound, onBack: () -> 
             if (selection.active) SelectionBar(selection, shown.map { it.id }) {
                 IconButton(onClick = { moving = true }) { Icon(Icons.Default.DateRange, contentDescription = "Move to another day") }
                 IconButton(onClick = { vm.deleteSelected(shown) }) { Icon(Icons.Default.Delete, contentDescription = "Remove items") }
-            } else if (query != null) TopAppBar(
-                title = {
-                    TextField(
-                        value = query.orEmpty(), onValueChange = { vm.searchQuery.value = it },
-                        modifier = Modifier.fillMaxWidth().focusRequester(searchFocus),
-                        placeholder = { Text("Search all lists") }, singleLine = true,
-                        colors = TextFieldDefaults.colors(
-                            focusedContainerColor = Color.Transparent, unfocusedContainerColor = Color.Transparent,
-                        ),
-                        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Search),
-                    )
-                    LaunchedEffect(Unit) { searchFocus.requestFocus() }
-                },
-                navigationIcon = { IconButton(onClick = { vm.searchQuery.value = null }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Close search") } },
-                actions = {
-                    if (!query.isNullOrEmpty()) IconButton(onClick = { vm.searchQuery.value = "" }) { Icon(Icons.Default.Clear, contentDescription = "Clear search") }
-                },
-            ) else TopAppBar(
+            } else if (query != null) SearchTopBar(query.orEmpty(), "Search all lists", { vm.searchQuery.value = it }) { vm.searchQuery.value = null }
+            else TopAppBar(
                 title = { Text("Shopping") },
                 navigationIcon = { BackButton(onBack) },
                 actions = {
@@ -646,7 +721,7 @@ fun ShoppingScreen(vm: ShoppingViewModel, setting: ReminderSound, onBack: () -> 
             return@Scaffold
         }
         Column(Modifier.padding(padding).fillMaxSize()) {
-            WeekStrip(today, day, marked, anytimeCount, onPick = vm::show, revision = vm.shownTimes)
+            WeekStrip(today, day, marked, anytimeCount, onPick = vm::show, revision = vm.shownTimes, calendar = true)
             DayHeader(day, today, list, done = checked.size, total = state.items.size)
             // Suggestions pop up right under the box while typing (the box keeps the keyboard).
             val suggestions = vm.suggestions(state, withAnytime = day == today)
@@ -805,8 +880,11 @@ private fun WeekStrip(
     allowPast: Boolean = true,
     anytimeSelected: Boolean = selected == null,
     revision: Int = 0,
+    calendar: Boolean = false,
 ) {
     val first = remember { Week.firstDay() }
+    var monthOpen by rememberSaveable { mutableStateOf(false) }
+    val focusManager = LocalFocusManager.current
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     key(today) {
         val pager = androidx.compose.foundation.pager.rememberPagerState(
@@ -820,12 +898,25 @@ private fun WeekStrip(
         val shownStart = Week.startAt(today, pager.currentPage - THIS_WEEK, first)
         Column {
             Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(Week.monthLabel(shownStart), Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                // With [calendar], the month opens a month calendar (the Move sheet's strip has its own date picker).
+                Row(
+                    Modifier.weight(1f).heightIn(min = 48.dp).then(
+                        if (calendar) Modifier.clip(MaterialTheme.shapes.small)
+                            .clickable(onClickLabel = "Open the month calendar") { focusManager.clearFocus(); monthOpen = true } else Modifier,
+                    ),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        Week.monthLabel(shownStart), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false),
+                    )
+                    if (calendar) Icon(Icons.Default.ArrowDropDown, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
                 if (pager.currentPage != THIS_WEEK || (selected != today && allowPast)) {
                     OutlinedButton(
                         onClick = { onPick(today); scope.launch { pager.animateScrollToPage(THIS_WEEK) } },
                         contentPadding = PaddingValues(horizontal = 12.dp), modifier = Modifier.heightIn(min = 32.dp),
-                    ) { Text("Today") }
+                    ) { Text("Go to today", maxLines = 1) }
                 }
                 IconButton(onClick = { scope.launch { pager.animateScrollToPage((pager.currentPage - 1).coerceAtLeast(0)) } }) {
                     Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = "Previous week")
@@ -851,6 +942,115 @@ private fun WeekStrip(
                 }
             }
         }
+        // Opens on the month of the day shown (or today) when it's in the shown week, else the week's middle day's.
+        val anchor = listOfNotNull(selected.takeIf { !anytimeSelected }, today)
+            .firstOrNull { !it.isBefore(shownStart) && it.isBefore(shownStart.plusDays(7)) } ?: shownStart.plusDays(3)
+        if (monthOpen) MonthCalendar(
+            start = java.time.YearMonth.from(anchor), today = today, first = first,
+            // Only days the strip can show.
+            range = Week.startAt(today, -THIS_WEEK, first)..Week.startAt(today, WEEKS - 1 - THIS_WEEK, first).plusDays(6),
+            selected = selected.takeIf { !anytimeSelected }, marked = marked,
+            onPick = { date ->
+                monthOpen = false
+                onPick(date)
+                scope.launch { pager.animateScrollToPage((THIS_WEEK + Week.offset(today, date, first)).coerceIn(0, WEEKS - 1)) }
+            },
+            onDismiss = { monthOpen = false },
+        )
+    }
+}
+
+/**
+ * The month calendar (tap the month over the week strip): a month at a time, ‹ › for others, a dot on each day with
+ * something to buy. Tapping a day shows it; *Go to today* shows today.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun MonthCalendar(
+    start: java.time.YearMonth, today: LocalDate, first: java.time.DayOfWeek, selected: LocalDate?, marked: Set<LocalDate>,
+    range: ClosedRange<LocalDate>, onPick: (LocalDate) -> Unit, onDismiss: () -> Unit,
+) {
+    var month by rememberSaveable { mutableStateOf(start) }
+    val locale = java.util.Locale.getDefault()
+    androidx.compose.material3.ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(Modifier.padding(start = 12.dp, end = 12.dp, bottom = 16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = { month = month.minusMonths(1) }, enabled = month.atDay(1).isAfter(range.start)) {
+                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = "Previous month")
+                }
+                Text(
+                    java.time.format.DateTimeFormatter.ofPattern("LLLL yyyy", locale).format(month),
+                    style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center,
+                    modifier = Modifier.weight(1f).semantics { liveRegion = LiveRegionMode.Polite },
+                )
+                IconButton(onClick = { month = month.plusMonths(1) }, enabled = month.atEndOfMonth().isBefore(range.endInclusive)) {
+                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "Next month")
+                }
+            }
+            Row(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                Week.days(Week.start(today, first)).forEach { d ->
+                    Text(
+                        d.dayOfWeek.getDisplayName(java.time.format.TextStyle.SHORT, locale), Modifier.weight(1f).clearAndSetSemantics { },
+                        style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center, maxLines = 1,
+                    )
+                }
+            }
+            Week.monthGrid(month, first).chunked(7).forEach { week ->
+                Row(Modifier.fillMaxWidth()) {
+                    week.forEach { date ->
+                        if (date == null) Spacer(Modifier.weight(1f))
+                        else MonthDay(Modifier.weight(1f), date, today, picked = date == selected, marked = date in marked, enabled = date in range) { onPick(date) }
+                    }
+                }
+            }
+            Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.End) {
+                TextButton(onClick = { onPick(today) }) { Text("Go to today") }
+            }
+        }
+    }
+}
+
+/** A day in the month calendar: as in the strip, today ringed, the shown day filled, a dot when it has shopping. */
+@Composable
+private fun MonthDay(modifier: Modifier, date: LocalDate, today: LocalDate, picked: Boolean, marked: Boolean, enabled: Boolean, onClick: () -> Unit) {
+    val c = MaterialTheme.colorScheme
+    val locale = java.util.Locale.getDefault()
+    Column(
+        modifier.heightIn(min = 48.dp)
+            .clearAndSetSemantics {
+                contentDescription = buildString {
+                    append(date.dayOfWeek.getDisplayName(java.time.format.TextStyle.FULL, locale)).append(' ')
+                    append(DateStyle.SHORT.format(date, today))
+                    if (date == today) append(", today")
+                    if (marked) append(", has shopping")
+                }
+                selected = picked
+                role = Role.Button
+                if (enabled) onClick { onClick(); true } else disabled()
+            }
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(vertical = 3.dp)
+            .alpha(if (enabled) 1f else 0.38f),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(
+            Modifier.size(36.dp)
+                .background(if (picked) c.primary else Color.Transparent, CircleShape)
+                .border(2.dp, if (date == today && !picked) c.primary else Color.Transparent, CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                date.dayOfMonth.toString(), style = MaterialTheme.typography.titleSmall,
+                color = when {
+                    picked -> c.onPrimary
+                    date.isBefore(today) -> c.onSurfaceVariant
+                    else -> c.onSurface
+                },
+            )
+        }
+        Spacer(Modifier.height(3.dp))
+        Box(Modifier.size(5.dp).background(if (marked) c.primary else Color.Transparent, CircleShape))
     }
 }
 

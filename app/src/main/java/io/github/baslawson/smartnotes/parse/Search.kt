@@ -3,8 +3,15 @@ package io.github.baslawson.smartnotes.parse
 object Search {
     private val WORD = Regex("""[\p{L}\p{N}]+""")
 
-    /** The words typed in the search box, lowercased; at most 10. */
-    fun terms(input: String): List<String> =
+    /**
+     * The words typed in the search box, lowercased; at most [limit]. Split first, then lowercased, like the text they
+     * are matched against ([matches], [matchesAll]): "İ" lowercases to i + a combining dot, which would split a word.
+     */
+    fun terms(input: String, limit: Int = 10): List<String> =
+        WORD.findAll(input).map { it.value.lowercase() }.distinct().take(limit).toList()
+
+    /** As [terms] used to be for the notes index (lowercased first), so FTS queries behave as before. */
+    private fun ftsTerms(input: String): List<String> =
         WORD.findAll(input.lowercase()).map { it.value }.distinct().take(10).toList()
 
     /**
@@ -13,7 +20,7 @@ object Search {
      * Words are lowercased, so "and"/"or"/"not" are never read as operators (those are upper case in FTS).
      */
     fun matchQuery(input: String): String? =
-        terms(input).takeIf { it.isNotEmpty() }?.joinToString(" ") { "$it*" }
+        ftsTerms(input).takeIf { it.isNotEmpty() }?.joinToString(" ") { "$it*" }
 
     /** Character ranges in [text] of the words that start with one of [terms] (for highlighting). */
     fun matches(text: String, terms: List<String>): List<IntRange> {
@@ -21,13 +28,34 @@ object Search {
         return WORD.findAll(text).mapNotNull { w ->
             val lower = w.value.lowercase()
             terms.filter { lower.startsWith(it) }.maxOfOrNull { it.length }
-                ?.let { w.range.first until w.range.first + it }
+                ?.let { w.range.first until w.range.first + originalLength(w.value, it) }
         }.toList()
     }
 
-    /** A one-line piece of [body] around the first match, or its start when nothing matches. */
-    fun snippet(body: String, terms: List<String>, length: Int = 120): String {
-        val flat = NoteParser.readable(body).replace(Regex("""\s+"""), " ").trim()
+    /**
+     * How many characters of [word] lowercase to at least [lowerLength] characters: lowercasing can lengthen text
+     * ("İ" → i + a combining dot), so a match's length in the lowercased word isn't its length in the original.
+     */
+    private fun originalLength(word: String, lowerLength: Int): Int {
+        var k = 0
+        while (k < word.length && word.substring(0, k).lowercase().length < lowerLength) k++
+        return k
+    }
+
+    /** Whether every one of [terms] starts a word in [text] (as Notes search: "den call" finds "Call the dentist"). */
+    fun matchesAll(text: String, terms: List<String>): Boolean {
+        if (terms.isEmpty()) return false
+        // Split first, then lowercase (as [matches]): "İ" lowercases to two characters, which would split a word.
+        val words = WORD.findAll(text).map { it.value.lowercase() }.toList()
+        return terms.all { t -> words.any { it.startsWith(t) } }
+    }
+
+    /**
+     * A one-line piece of [body] around the first match, or its start when nothing matches. Note syntax is shown as it
+     * reads ([readable]); a task's details are plain text, so their #words and [[links]] stay as typed.
+     */
+    fun snippet(body: String, terms: List<String>, length: Int = 120, readable: Boolean = true): String {
+        val flat = (if (readable) NoteParser.readable(body) else body).replace(Regex("""\s+"""), " ").trim()
         val first = matches(flat, terms).firstOrNull()?.first ?: 0
         val start = if (first < 30) 0 else (first - 30).let { s -> flat.indexOf(' ', s).takeIf { it in s until first }?.plus(1) ?: s }
         val end = minOf(flat.length, start + length)

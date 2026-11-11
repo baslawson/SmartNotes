@@ -24,6 +24,17 @@ object Week {
     /** The week [offset] weeks after [today]'s: its first day. */
     fun startAt(today: LocalDate, offset: Int, first: DayOfWeek): LocalDate = start(today, first).plusWeeks(offset.toLong())
 
+    /**
+     * The month calendar's cells, a row of seven per week starting on [first]: the month's days, with nulls before
+     * the 1st and after the last day so every row is full.
+     */
+    fun monthGrid(month: java.time.YearMonth, first: DayOfWeek): List<LocalDate?> {
+        val lead = (month.atDay(1).dayOfWeek.value - first.value + 7) % 7
+        val days = List(month.lengthOfMonth()) { month.atDay(it + 1) }
+        val cells = List<LocalDate?>(lead) { null } + days
+        return cells + List((7 - cells.size % 7) % 7) { null }
+    }
+
     /** "November 2026"; a week across two months "Nov – Dec 2026", across two years "Dec 2026 – Jan 2027". */
     fun monthLabel(start: LocalDate, locale: Locale = Locale.getDefault()): String {
         val end = start.plusDays(6)

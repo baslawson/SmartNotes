@@ -27,12 +27,18 @@ within a priority), ticked ones below under *Done* (hidden until shown; can be c
 reminder: a date and time, its sound, and a repeat (every day / week / month / N days; monthly keeps its day, Jan 31 →
 Feb 28 → Mar 31). Ticking a repeating task moves its reminder to the next time instead.
 
+On the right of the add box: ✓ adds what is typed, 🔍 searches all tasks (starting with what is typed, if anything).
+Every word typed must start a word in the task's title or details, capitals ignored ("den call" finds "Call the
+dentist"). Open tasks come first in the chosen order, then done ones (latest done first, struck through), the matches
+highlighted; when the match is in the details, that part of them shows. Tap a result to open the task; ← or Back
+closes the search.
+
 ## Shopping
 
 Shopping is planned by day. At the top is the **week strip**: the *Anytime* tile (things to buy whenever, with how
 many are still to buy), then the days of the week (starting on the phone's first day of the week). Today is ringed, the
 day shown is filled, and a dot marks each day with something still to buy. Swipe the strip, or ‹ ›, for other weeks;
-*Today* comes back. Tap any day to see its list: there is no step to make one, a day gets its list with its first item
+*Go to today* comes back; tap the month (▾) for a month calendar with the same dots, ‹ › for other months. Tap any day to see its list: there is no step to make one, a day gets its list with its first item
 (until then it says *Nothing planned yet*). On today, Anytime's items show below today's, under *Also on Anytime*, to
 tick off in the shop too. ✎ sets the day's reminder (with its sound), moves its list to another day (one list per
 day), or deletes it. Anytime can't be deleted.
