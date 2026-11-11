@@ -145,6 +145,10 @@ import androidx.compose.runtime.mutableIntStateOf
 import io.github.baslawson.smartnotes.parse.PastItem
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.ui.text.input.TextFieldValue
 import io.github.baslawson.smartnotes.parse.Shopping
 import io.github.baslawson.smartnotes.parse.Search
@@ -961,52 +965,84 @@ private fun WeekStrip(
 }
 
 /**
- * The month calendar (tap the month over the week strip): a month at a time, ‹ › for others, a dot on each day with
- * something to buy. Tapping a day shows it; *Go to today* shows today.
+ * The month calendar (tap the month over the week strip), a popup in the middle of the screen: swipe (or ‹ ›) for
+ * other months, a dot on each day with something to buy. Tapping a day shows it; *Go to today* shows today. Only the
+ * days the strip can show ([range]).
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun MonthCalendar(
     start: java.time.YearMonth, today: LocalDate, first: java.time.DayOfWeek, selected: LocalDate?, marked: Set<LocalDate>,
     range: ClosedRange<LocalDate>, onPick: (LocalDate) -> Unit, onDismiss: () -> Unit,
 ) {
-    var month by rememberSaveable { mutableStateOf(start) }
     val locale = java.util.Locale.getDefault()
-    androidx.compose.material3.ModalBottomSheet(onDismissRequest = onDismiss) {
-        Column(Modifier.padding(start = 12.dp, end = 12.dp, bottom = 16.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = { month = month.minusMonths(1) }, enabled = month.atDay(1).isAfter(range.start)) {
-                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = "Previous month")
-                }
-                Text(
-                    java.time.format.DateTimeFormatter.ofPattern("LLLL yyyy", locale).format(month),
-                    style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center,
-                    modifier = Modifier.weight(1f).semantics { liveRegion = LiveRegionMode.Polite },
-                )
-                IconButton(onClick = { month = month.plusMonths(1) }, enabled = month.atEndOfMonth().isBefore(range.endInclusive)) {
-                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "Next month")
-                }
-            }
-            Row(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-                Week.days(Week.start(today, first)).forEach { d ->
+    val firstMonth = java.time.YearMonth.from(range.start)
+    val months = Week.monthsBetween(firstMonth, java.time.YearMonth.from(range.endInclusive)) + 1
+    val pager = androidx.compose.foundation.pager.rememberPagerState(
+        initialPage = Week.monthsBetween(firstMonth, start).coerceIn(0, months - 1),
+    ) { months }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val shown = firstMonth.plusMonths(pager.currentPage.toLong())
+    // A card in the middle with a margin each side (not the platform's dialog width, which can fill a phone). The
+    // window fills the screen, so a tap anywhere around the card closes it, and the window doesn't resize with a month.
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = onDismiss,
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Box(
+            Modifier.fillMaxSize().pointerInput(Unit) { detectTapGestures { onDismiss() } }.padding(24.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+        androidx.compose.material3.Surface(
+            // Taps on the card itself (its title, blank cells, a disabled day) don't reach the close-on-tap around it.
+            modifier = Modifier.widthIn(max = 420.dp).pointerInput(Unit) { detectTapGestures { } },
+            shape = MaterialTheme.shapes.extraLarge, color = MaterialTheme.colorScheme.surfaceContainerHigh, tonalElevation = 6.dp,
+        ) {
+            // Scrolls when the screen is too short for it (a phone on its side).
+            Column(Modifier.verticalScroll(rememberScrollState()).padding(start = 8.dp, end = 8.dp, top = 12.dp, bottom = 8.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = { scope.launch { pager.animateScrollToPage(pager.targetPage - 1) } }, enabled = pager.targetPage > 0) {
+                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = "Previous month")
+                    }
                     Text(
-                        d.dayOfWeek.getDisplayName(java.time.format.TextStyle.SHORT, locale), Modifier.weight(1f).clearAndSetSemantics { },
-                        style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = TextAlign.Center, maxLines = 1,
+                        java.time.format.DateTimeFormatter.ofPattern("LLLL yyyy", locale).format(shown),
+                        style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center,
+                        modifier = Modifier.weight(1f).semantics { liveRegion = LiveRegionMode.Polite },
                     )
-                }
-            }
-            Week.monthGrid(month, first).chunked(7).forEach { week ->
-                Row(Modifier.fillMaxWidth()) {
-                    week.forEach { date ->
-                        if (date == null) Spacer(Modifier.weight(1f))
-                        else MonthDay(Modifier.weight(1f), date, today, picked = date == selected, marked = date in marked, enabled = date in range) { onPick(date) }
+                    IconButton(onClick = { scope.launch { pager.animateScrollToPage(pager.targetPage + 1) } }, enabled = pager.targetPage < months - 1) {
+                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "Next month")
                     }
                 }
+                Row(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                    Week.days(Week.start(today, first)).forEach { d ->
+                        Text(
+                            d.dayOfWeek.getDisplayName(java.time.format.TextStyle.SHORT, locale), Modifier.weight(1f).clearAndSetSemantics { },
+                            style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center, maxLines = 1,
+                        )
+                    }
+                }
+                // Swipe for other months; every month gets six rows, so the popup keeps its height.
+                androidx.compose.foundation.pager.HorizontalPager(pager, Modifier.fillMaxWidth().testTag("month-pager")) { page ->
+                    val grid = Week.monthGrid(firstMonth.plusMonths(page.toLong()), first)
+                    Column {
+                        (grid + List(42 - grid.size) { null }).chunked(7).forEach { week ->
+                            // Every row the same height, with or without days in it.
+                            Row(Modifier.fillMaxWidth().height(50.dp)) {
+                                week.forEach { date ->
+                                    if (date == null) Spacer(Modifier.weight(1f))
+                                    else MonthDay(
+                                        Modifier.weight(1f), date, today, picked = date == selected, marked = date in marked, enabled = date in range,
+                                    ) { onPick(date) }
+                                }
+                            }
+                        }
+                    }
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    TextButton(onClick = { onPick(today) }) { Text("Go to today") }
+                }
             }
-            Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.End) {
-                TextButton(onClick = { onPick(today) }) { Text("Go to today") }
-            }
+        }
         }
     }
 }

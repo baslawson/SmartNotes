@@ -38,7 +38,7 @@ closes the search.
 Shopping is planned by day. At the top is the **week strip**: the *Anytime* tile (things to buy whenever, with how
 many are still to buy), then the days of the week (starting on the phone's first day of the week). Today is ringed, the
 day shown is filled, and a dot marks each day with something still to buy. Swipe the strip, or ‹ ›, for other weeks;
-*Go to today* comes back; tap the month (▾) for a month calendar with the same dots, ‹ › for other months. Tap any day to see its list: there is no step to make one, a day gets its list with its first item
+*Go to today* comes back; tap the month (▾) for a month calendar (a popup with the same dots; swipe or ‹ › for other months). Tap any day to see its list: there is no step to make one, a day gets its list with its first item
 (until then it says *Nothing planned yet*). On today, Anytime's items show below today's, under *Also on Anytime*, to
 tick off in the shop too. ✎ sets the day's reminder (with its sound), moves its list to another day (one list per
 day), or deletes it. Anytime can't be deleted.

@@ -54,4 +54,11 @@ class WeekTest {
         assertEquals(LocalDate.of(2028, 2, 29), feb28.filterNotNull().last())
         assertEquals(0, feb28.size % 7)
     }
+
+    @Test fun monthsBetweenCountsCalendarMonths() {
+        val nov = java.time.YearMonth.of(2026, 11)
+        assertEquals(0, Week.monthsBetween(nov, nov))
+        assertEquals(2, Week.monthsBetween(nov, java.time.YearMonth.of(2027, 1)))
+        assertEquals(-11, Week.monthsBetween(nov, java.time.YearMonth.of(2025, 12)))
+    }
 }

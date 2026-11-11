@@ -97,7 +97,12 @@ class ScreenshotTest {
         compose.onNodeWithText("Tomorrow").performClick()
         compose.waitForIdle()
         // A day with nothing planned yet.
-        val ahead = LocalDate.now().plusDays(3)
+        // A day in this week's strip with nothing on it (today and the next two days have lists): later in the week if
+        // there is one, else earlier. (Not next week: a pager that animates never lets Robolectric's main thread idle.)
+        val now = LocalDate.now()
+        val week = io.github.baslawson.smartnotes.data.Week
+        val free = week.days(week.start(now, week.firstDay())).filter { it.isBefore(now) || it.isAfter(now.plusDays(2)) }
+        val ahead = free.firstOrNull { it.isAfter(now) } ?: free.last()
         compose.onNodeWithContentDescription(io.github.baslawson.smartnotes.DateStyle.SHORT.format(ahead), substring = true).performClick()
         shot("light-7-empty-day", "Nothing planned yet")
         // Tap the month for a month calendar.
@@ -105,6 +110,13 @@ class ScreenshotTest {
             io.github.baslawson.smartnotes.data.Week.start(ahead, io.github.baslawson.smartnotes.data.Week.firstDay()))).performClick()
         compose.waitUntil(10_000) { compose.onAllNodesWithContentDescription("Previous month").fetchSemanticsNodes().isNotEmpty() }
         shot("light-7b-month")
+        // A tap on the card (its title) keeps it open; the strip's month label is the clickable one.
+        val title = java.time.format.DateTimeFormatter.ofPattern("LLLL yyyy").format(java.time.YearMonth.from(ahead))
+        compose.onNode(hasText(title) and !hasClickAction()).performClick()
+        compose.waitForIdle()
+        compose.onNodeWithContentDescription("Previous month").assertExists()
+        // (Not swiped here: under Robolectric a pager that moves inside a dialog never lets the main thread idle,
+        // even in a bare Dialog { HorizontalPager }, so the swipe is only checked on a device.)
         compose.onAllNodesWithText("Go to today").onLast().performClick()
         compose.waitForIdle()
         // Tasks: 🔍 in the add box searches all tasks, done ones too.

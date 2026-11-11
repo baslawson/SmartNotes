@@ -35,6 +35,9 @@ object Week {
         return cells + List((7 - cells.size % 7) % 7) { null }
     }
 
+    /** How many months [to] is after [from] (negative: before); the month calendar's page for [to] when it starts at [from]. */
+    fun monthsBetween(from: java.time.YearMonth, to: java.time.YearMonth): Int = ChronoUnit.MONTHS.between(from, to).toInt()
+
     /** "November 2026"; a week across two months "Nov – Dec 2026", across two years "Dec 2026 – Jan 2027". */
     fun monthLabel(start: LocalDate, locale: Locale = Locale.getDefault()): String {
         val end = start.plusDays(6)
