@@ -7,6 +7,7 @@ import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.test.core.app.ApplicationProvider
@@ -64,6 +65,9 @@ class ScreenshotTest {
     private fun tour(prefix: String) {
         compose.waitForIdle()
         shot("$prefix-1-notes", "Garden")
+        compose.onNodeWithContentDescription("Show as grid").performClick()
+        shot("$prefix-1-notes-grid", "Garden")
+        compose.onNodeWithContentDescription("Show as list").performClick()
         compose.onNodeWithText("Holiday ideas").performClick()
         shot("$prefix-2-note", "Lisbon")
         compose.activity.onBackPressedDispatcher.let { compose.runOnUiThread { it.onBackPressed() } }

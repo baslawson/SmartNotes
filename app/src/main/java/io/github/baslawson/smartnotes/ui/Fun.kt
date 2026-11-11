@@ -48,6 +48,7 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlin.random.Random
 
@@ -209,13 +210,13 @@ fun EmptyState(icon: ImageVector, title: String, hint: String) {
  * phone only, like the rest of where you left off).
  */
 @Composable
-fun OneTimeTip(tip: String, text: String) {
+fun OneTimeTip(tip: String, text: String, horizontal: Dp = 12.dp) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val state = remember { io.github.baslawson.smartnotes.AppState(context.getSharedPreferences("state", android.content.Context.MODE_PRIVATE)) }
     var shown by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(!state.tipSeen(tip)) }
     androidx.compose.animation.AnimatedVisibility(shown) {
         Row(
-            Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+            Modifier.padding(horizontal = horizontal, vertical = 4.dp)
                 .background(MaterialTheme.colorScheme.primaryContainer, MaterialTheme.shapes.medium)
                 .padding(start = 16.dp, top = 12.dp, bottom = 4.dp, end = 4.dp),
             verticalAlignment = Alignment.Top,

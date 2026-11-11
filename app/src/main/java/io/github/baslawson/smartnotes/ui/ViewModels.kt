@@ -104,6 +104,10 @@ class NotesViewModel(
 ) : ViewModel() {
     val sort: StateFlow<NoteSort> = settings.noteSort
 
+    /** Notes as a grid of cards (or a list). */
+    val grid: StateFlow<Boolean> = settings.noteGrid
+    fun setGrid(grid: Boolean) = settings.setNoteGrid(grid)
+
     /** The sort button. The first time "My order" is chosen, the order on screen then becomes its start. */
     fun setSort(new: NoteSort) {
         val old = sort.value

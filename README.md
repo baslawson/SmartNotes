@@ -16,6 +16,9 @@ Everything "smart" in a note is read from its plain text, so the text stays the 
 Also: full-text search (Room FTS4, word prefixes, matches highlighted), related notes (shared tags and words), and
 **Share → SmartNotes** from other apps (text or a link becomes a new note; the subject is its title).
 **+** opens a new note with the cursor in its text and the keyboard up.
+The button left of sort (four squares) shows notes as a **grid** of cards, each as tall as its note (two columns on a
+phone, more on a wider screen), with a longer preview; the list button switches back. The choice is remembered and
+kept in backups. Everything else works the same in both: search, tags, pinned first, long-press to select, ≡ to drag.
 
 ## Tasks
 

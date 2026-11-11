@@ -58,6 +58,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.material3.Surface
 import sh.calvin.reorderable.rememberReorderableLazyListState
+import sh.calvin.reorderable.rememberReorderableLazyStaggeredGridState
+import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
+import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
+import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridItemSpan
+import androidx.compose.foundation.lazy.staggeredgrid.items
+import androidx.compose.foundation.layout.height
+import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.materialIcon
+import androidx.compose.material.icons.materialPath
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.unit.Density
 import sh.calvin.reorderable.ReorderableItem
 import io.github.baslawson.smartnotes.data.Sorting
 import io.github.baslawson.smartnotes.data.NoteSort
@@ -111,6 +122,7 @@ fun NotesScreen(
     val query by vm.query.collectAsStateWithLifecycle()
     val selectedTag by vm.tag.collectAsStateWithLifecycle()
     val sort by vm.sort.collectAsStateWithLifecycle()
+    val grid by vm.grid.collectAsStateWithLifecycle()
     // Handles in every order (a drop switches to My order), for the whole list: not while searching, filtering by a tag
     // or selecting. (state.terms / state.tag: the rows shown still belong to a search or filter until it has cleared.)
     val canArrange = query.isBlank() && state.terms.isEmpty() && selectedTag == null && state.tag == null && !selection.active
@@ -125,6 +137,10 @@ fun NotesScreen(
                 TopAppBar(
                     title = { Text("Notes") },
                     actions = {
+                        IconButton(onClick = { vm.setGrid(!grid) }) {
+                            if (grid) Icon(Icons.AutoMirrored.Filled.List, contentDescription = "Show as list")
+                            else Icon(GridIcon, contentDescription = "Show as grid")
+                        }
                         SortButton(SortGroup(null, NoteSort.entries, sort, { it.label }, vm::setSort))
                         Box {
                             IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, contentDescription = "More") }
@@ -181,19 +197,42 @@ fun NotesScreen(
                     if (query.isBlank() && selectedTag == null) EmptyState(Icons.Default.Edit, "No notes yet", "Tap + to write your first one.")
                     else EmptyState(Icons.Default.Search, "Nothing found", "Try other words, or another tag.")
                 else -> {
-                    val list = rememberLastScroll("notes")
                     val byId = state.rows.associateBy { it.note.id }
                     val order = rememberDragOrder(state.rows.map { it.note.id }, sort == NoteSort.MINE)
-                    val reorder = rememberReorderableLazyListState(list) { from, to ->
-                        val a = from.key as? Long
-                        val b = to.key as? Long
-                        // Pinned notes move among the pinned, the others among the others.
+                    // Pinned notes move among the pinned, the others among the others.
+                    val move = { from: Any, to: Any ->
+                        val a = from as? Long
+                        val b = to as? Long
                         if (a != null && b != null && byId[a]?.note?.pinned == byId[b]?.note?.pinned) order.move(a, b)
                     }
-                    LazyColumn(Modifier.fillMaxSize(), list, contentPadding = PaddingValues(bottom = 88.dp)) {
-                        item(key = "tip") {
-                            OneTimeTip("notes", "Write #tags, [[links]] to other notes and - [ ] checklists right in a note. Drag ≡ to reorder; long-press to select.")
+                    val tip = "Write #tags, [[links]] to other notes and - [ ] checklists right in a note. Drag ≡ to reorder; long-press to select."
+                    // Both kept while switching between list and grid.
+                    val cards = rememberLastGridScroll("notes-grid")
+                    val list = rememberLastScroll("notes")
+                    if (grid) {
+                        val reorder = rememberReorderableLazyStaggeredGridState(cards) { from, to -> move(from.key, to.key) }
+                        LazyVerticalStaggeredGrid(
+                            NoteColumns, Modifier.fillMaxSize(), cards,
+                            contentPadding = PaddingValues(start = 8.dp, end = 8.dp, bottom = 88.dp),
+                        ) {
+                            item(key = "tip", span = StaggeredGridItemSpan.FullLine) { OneTimeTip("notes", tip, horizontal = 4.dp) }
+                            items(order.ids.mapNotNull { byId[it] }, key = { it.note.id }) { row ->
+                                ReorderableItem(reorder, key = row.note.id, enabled = canArrange) { dragging ->
+                                    NoteCard(row, state.terms, dragging, canArrange, Modifier.selectable(selection, row.note.id) { onOpen(row.note.id) }) {
+                                        DragHandleIcon(
+                                            row.title,
+                                            Modifier.draggableHandle(onDragStarted = { order.start() }, onDragStopped = { order.stop()?.let(vm::arrange) })
+                                                .padding(12.dp),
+                                        )
+                                    }
+                                }
+                            }
                         }
+                        return@Column
+                    }
+                    val reorder = rememberReorderableLazyListState(list) { from, to -> move(from.key, to.key) }
+                    LazyColumn(Modifier.fillMaxSize(), list, contentPadding = PaddingValues(bottom = 88.dp)) {
+                        item(key = "tip") { OneTimeTip("notes", tip) }
                         items(order.ids.mapNotNull { byId[it] }, key = { it.note.id }) { row ->
                             ReorderableItem(reorder, key = row.note.id, enabled = canArrange) { dragging ->
                                 RowCard(dragging = dragging) {
@@ -240,6 +279,75 @@ private fun NoteRowItem(row: NoteRow, terms: List<String>, modifier: Modifier) {
         if (details.isNotEmpty()) {
             Text(details.joinToString("  ·  "), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
         }
+    }
+}
+
+/**
+ * A note as a card in the grid: title, a longer preview, tasks and tags. [handle] (when [withHandle]) sits in the top
+ * right corner, outside the card's tap and long-press area, so holding it drags rather than selects.
+ */
+@Composable
+private fun NoteCard(
+    row: NoteRow, terms: List<String>, dragging: Boolean, withHandle: Boolean, modifier: Modifier, handle: @Composable () -> Unit,
+) {
+    val c = MaterialTheme.colorScheme
+    Surface(
+        Modifier.fillMaxWidth().padding(4.dp),
+        shape = MaterialTheme.shapes.medium,
+        color = c.surfaceContainerLowest,
+        shadowElevation = if (dragging) 8.dp else if (LocalDark.current) 0.dp else 1.dp,
+    ) {
+        Box {
+            Column(modifier.fillMaxWidth().padding(start = 14.dp, end = 14.dp, top = 12.dp, bottom = 12.dp)) {
+                Row(verticalAlignment = Alignment.Top) {
+                    if (row.note.pinned) {
+                        Icon(Icons.Default.Star, contentDescription = "Pinned", Modifier.padding(top = 3.dp, end = 4.dp).size(16.dp), tint = c.primary)
+                    }
+                    Text(
+                        highlighted(row.title, terms), style = MaterialTheme.typography.titleMedium,
+                        maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
+                    )
+                    // Room for the handle.
+                    if (withHandle) Spacer(Modifier.width(24.dp))
+                }
+                if (row.snippet.isNotBlank()) {
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        highlighted(row.snippet, terms), style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 6, overflow = TextOverflow.Ellipsis, color = c.onSurfaceVariant,
+                    )
+                }
+                if (row.openTasks > 0) {
+                    Spacer(Modifier.height(6.dp))
+                    Text("☐ ${row.openTasks} open task${if (row.openTasks == 1) "" else "s"}", style = MaterialTheme.typography.labelMedium, color = c.primary)
+                }
+                if (row.tags.isNotEmpty()) {
+                    Spacer(Modifier.height(4.dp))
+                    Text(row.tags.joinToString(" ") { "#$it" }, style = MaterialTheme.typography.labelMedium, color = c.primary, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                }
+            }
+            if (withHandle) Box(Modifier.align(Alignment.TopEnd)) { handle() }
+        }
+    }
+}
+
+/** Grid columns: two on any phone (even a narrow one), one more for each further 200 dp or so on wider screens. */
+private val NoteColumns = object : StaggeredGridCells {
+    override fun Density.calculateCrossAxisCellSizes(availableSize: Int, spacing: Int): IntArray {
+        val count = maxOf(2, (availableSize / 200.dp.toPx()).toInt())
+        val width = (availableSize - spacing * (count - 1)) / count
+        val extra = (availableSize - spacing * (count - 1)) % count
+        return IntArray(count) { width + if (it < extra) 1 else 0 }
+    }
+}
+
+/** Four squares: the "show as grid" button (not in the small built-in icon set). */
+private val GridIcon: ImageVector = materialIcon(name = "SmartNotes.Grid") {
+    materialPath {
+        moveTo(4f, 4f); horizontalLineToRelative(7f); verticalLineToRelative(7f); horizontalLineToRelative(-7f); close()
+        moveTo(13f, 4f); horizontalLineToRelative(7f); verticalLineToRelative(7f); horizontalLineToRelative(-7f); close()
+        moveTo(4f, 13f); horizontalLineToRelative(7f); verticalLineToRelative(7f); horizontalLineToRelative(-7f); close()
+        moveTo(13f, 13f); horizontalLineToRelative(7f); verticalLineToRelative(7f); horizontalLineToRelative(-7f); close()
     }
 }
 

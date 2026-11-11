@@ -142,6 +142,26 @@ fun rememberLastScroll(key: String): LazyListState {
     return list
 }
 
+/** The same for a grid of cards (the Notes grid). */
+@OptIn(FlowPreview::class)
+@Composable
+fun rememberLastGridScroll(key: String): androidx.compose.foundation.lazy.staggeredgrid.LazyStaggeredGridState {
+    val app = LocalContext.current.applicationContext as SmartNotesApp
+    val grid = rememberSaveable(key, saver = androidx.compose.foundation.lazy.staggeredgrid.LazyStaggeredGridState.Saver) {
+        val (index, offset) = app.state.scroll(key)
+        androidx.compose.foundation.lazy.staggeredgrid.LazyStaggeredGridState(index, offset)
+    }
+    LaunchedEffect(grid, key) {
+        snapshotFlow { grid.firstVisibleItemIndex to grid.firstVisibleItemScrollOffset }
+            .drop(1).debounce(400)
+            .collect { (index, offset) -> app.state.setScroll(key, index, offset) }
+    }
+    DisposableEffect(grid, key) {
+        onDispose { app.state.setScroll(key, grid.firstVisibleItemIndex, grid.firstVisibleItemScrollOffset) }
+    }
+    return grid
+}
+
 // ---------- Recycle bin ----------
 
 private fun BinEntry.key(): Long = kind.ordinal * 1_000_000_000_000L + id
