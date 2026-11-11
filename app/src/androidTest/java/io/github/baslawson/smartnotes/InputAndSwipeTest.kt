@@ -12,6 +12,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.swipeLeft
@@ -244,5 +245,24 @@ class InputAndSwipeTest {
         compose.onNodeWithText("Not a staple").performClick()
         until { runBlocking { app.shopping.observeStaples().first().none { it.key == key } } }
         runBlocking { app.shopping.setAisle(listOf(key), null) }
+    }
+
+    @Test fun aNewNoteFromATemplate() {
+        val title = "Weekly plan $run"
+        runBlocking { app.notes.saveFinal(0, title, "Goals:\n#template\nMeals") }
+        tab("Notes")
+        compose.onNodeWithContentDescription("New note").performClick()
+        compose.onNodeWithText("Blank note").assertExists()
+        // The menu's line (the note itself is in the list behind it).
+        compose.onAllNodesWithText(title).onLast().performClick()
+        until { compose.onAllNodesWithText("Meals", substring = true).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("Goals:", substring = true).performTextInput("Monday ")
+        compose.onNodeWithContentDescription("Back").performClick()
+        fun copies() = runBlocking { app.notes.observeAll().first().filter { it.title == title } }
+        until { copies().size == 2 }
+        val copy = copies().first { "#template" !in it.body }
+        assertTrue(copy.body.contains("Meals"))
+        // Tidy up (the emulator's data stays between runs).
+        runBlocking { copies().forEach { app.notes.saveFinal(it.id, "", "") } }
     }
 }

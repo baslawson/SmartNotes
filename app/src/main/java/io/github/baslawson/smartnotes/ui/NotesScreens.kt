@@ -110,7 +110,8 @@ fun highlighted(text: String, terms: List<String>): AnnotatedString {
 fun NotesScreen(
     vm: NotesViewModel,
     onOpen: (Long) -> Unit,
-    onNew: () -> Unit,
+    /** A new note: blank (0), or from that template note. */
+    onNew: (template: Long) -> Unit,
     onSettings: () -> Unit,
     onBin: () -> Unit,
     bottomBar: @Composable () -> Unit,
@@ -136,6 +137,7 @@ fun NotesScreen(
     val selectedTag by vm.tag.collectAsStateWithLifecycle()
     val sort by vm.sort.collectAsStateWithLifecycle()
     val grid by vm.grid.collectAsStateWithLifecycle()
+    val templates by vm.templates.collectAsStateWithLifecycle()
     // Handles in every order (a drop switches to My order), for the whole list: not while searching, filtering by a tag
     // or selecting. (state.terms / state.tag: the rows shown still belong to a search or filter until it has cleared.)
     val canArrange = query.isBlank() && state.terms.isEmpty() && selectedTag == null && state.tag == null && !selection.active
@@ -172,7 +174,7 @@ fun NotesScreen(
         },
         bottomBar = bottomBar,
         floatingActionButton = {
-            if (!selection.active) FloatingActionButton(onClick = onNew) { Icon(Icons.Default.Add, contentDescription = "New note") }
+            if (!selection.active) NewNoteButton(templates, onNew)
         },
     ) { padding ->
         Column(Modifier.padding(padding).fillMaxSize()) {
@@ -282,6 +284,31 @@ fun NotesScreen(
     }
 }
 
+/**
+ * +: a new note. Once there are template notes (#template), it asks first: *Blank note* or one of them, whose text the
+ * new note starts with.
+ */
+@Composable
+private fun NewNoteButton(templates: List<Pair<Long, String>>, onNew: (Long) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        FloatingActionButton(onClick = { if (templates.isEmpty()) onNew(0L) else open = true }) {
+            Icon(Icons.Default.Add, contentDescription = "New note")
+        }
+        DropdownMenu(open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(text = { Text("Blank note") }, onClick = { open = false; onNew(0L) })
+            HorizontalDivider()
+            Text(
+                "From a template", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+            )
+            templates.forEach { (id, title) ->
+                DropdownMenuItem(text = { Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) }, onClick = { open = false; onNew(id) })
+            }
+        }
+    }
+}
+
 @Composable
 internal fun NoteRowItem(row: NoteRow, terms: List<String>, modifier: Modifier) {
     Column(Modifier.fillMaxWidth().then(modifier).padding(horizontal = 16.dp, vertical = 12.dp)) {
@@ -303,7 +330,9 @@ internal fun NoteRowItem(row: NoteRow, terms: List<String>, modifier: Modifier) 
         }
         val details = buildList {
             if (row.openTasks > 0) add("${row.openTasks} open task${if (row.openTasks == 1) "" else "s"}")
-            if (row.tags.isNotEmpty()) add(row.tags.joinToString(" ") { "#$it" })
+            if (NoteParser.TEMPLATE in row.tags) add("Template")
+            val tags = row.tags - NoteParser.TEMPLATE
+            if (tags.isNotEmpty()) add(tags.joinToString(" ") { "#$it" })
         }
         if (details.isNotEmpty()) {
             Text(details.joinToString("  ·  "), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
@@ -350,9 +379,11 @@ private fun NoteCard(
                     Spacer(Modifier.height(6.dp))
                     Text("☐ ${row.openTasks} open task${if (row.openTasks == 1) "" else "s"}", style = MaterialTheme.typography.labelMedium, color = c.primary)
                 }
-                if (row.tags.isNotEmpty()) {
+                val tags = row.tags - NoteParser.TEMPLATE
+                if (NoteParser.TEMPLATE in row.tags || tags.isNotEmpty()) {
                     Spacer(Modifier.height(4.dp))
-                    Text(row.tags.joinToString(" ") { "#$it" }, style = MaterialTheme.typography.labelMedium, color = c.primary, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    val words = listOfNotNull("Template".takeIf { NoteParser.TEMPLATE in row.tags }) + tags.map { "#$it" }
+                    Text(words.joinToString(" "), style = MaterialTheme.typography.labelMedium, color = c.primary, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
             }
             if (withHandle) Box(Modifier.align(Alignment.TopEnd)) { handle() }

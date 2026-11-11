@@ -7,6 +7,8 @@ import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onRoot
+import org.junit.Assert.assertEquals
+import io.github.baslawson.smartnotes.parse.NoteParser
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.onAllNodesWithContentDescription
@@ -218,6 +220,23 @@ class ScreenshotTest {
         compose.waitUntil(10_000) { compose.onAllNodesWithText("Breakfast (1)").fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText("coffee").assertExists()
         compose.onNodeWithText("Add staples", substring = true).assertDoesNotExist()
+    }
+
+    /** + offers a blank note or a template once there is one; the new note starts with its text, without #template. */
+    @Test fun aNewNoteFromATemplate() {
+        val app = app()
+        runBlocking {
+            app.notes.saveFinal(0, "Weekly plan", "Goals:\n- [ ] \n#template\nMeals #food")
+            app.notes.saveFinal(0, "Garden", "Plant tulip bulbs")
+        }
+        compose.waitUntil(10_000) { compose.onAllNodesWithText("Template", substring = true).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithContentDescription("New note").performClick()
+        shot("light-15-new-from-template", "Blank note")
+        compose.onNodeWithText("From a template").assertExists()
+        compose.onAllNodesWithText("Weekly plan").onLast().performClick()
+        compose.waitUntil(10_000) { compose.onAllNodesWithText("Meals #food", substring = true).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("#template", substring = true).assertDoesNotExist()
+        // (Saving the new note is checked on the emulator: InputAndSwipeTest.aNewNoteFromATemplate.)
     }
 
     @Test fun dark() {

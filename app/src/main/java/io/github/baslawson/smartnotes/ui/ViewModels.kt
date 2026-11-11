@@ -9,6 +9,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
 import io.github.baslawson.smartnotes.AppLog
 import io.github.baslawson.smartnotes.data.Sorting
@@ -145,6 +146,13 @@ class NotesViewModel(
     /** What the search box finds in the other sections too (tasks, shopping), listed below the notes. */
     val found: StateFlow<Found> = (everywhere?.find(query) ?: flowOf(Found())).stateIn(viewModelScope, SHARING, Found())
 
+    /** Notes tagged #template, A–Z by title: + offers them as the start of a new note. */
+    val templates: StateFlow<List<Pair<Long, String>>> = repo.observeAll().map { notes ->
+        notes.filter { NoteParser.isTemplate(it.title, it.body) }
+            .map { it.id to NoteParser.displayTitle(it.title, it.body) }
+            .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.second })
+    }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SHARING, emptyList())
+
     /** Ticks a task found by the search. */
     fun setTaskDone(todo: Todo, done: Boolean) { everywhere?.setDone(todo, done) }
 
@@ -216,11 +224,27 @@ class EditorViewModel(
     startTitle: String,
     /** Raised by every restore (Settings → Backup): this editor's copy is then out of date, so it closes unsaved. */
     restores: StateFlow<Long> = MutableStateFlow(0L),
+    /** A new note started from this template note (+ on Notes): its text, without #template. */
+    private val templateId: Long = 0L,
+    /**
+     * Keeps the id a new note got when first saved, so the screen brought back after Android closed the app opens
+     * that note (not an empty one, or the template again).
+     */
+    private val saved: SavedStateHandle? = null,
 ) : ViewModel() {
-    var id by mutableLongStateOf(startId)
-        private set
+    /** A new note saved before Android closed the app: brought back as that note. */
+    private val restoredId: Long? = saved?.get<Long>(KEY_ID)?.takeIf { startId == 0L && it > 0 }
+    private var currentId by mutableLongStateOf(restoredId ?: startId)
+    /** Opened with no note yet (+, a [[link]]): its id, once saved, is kept for being brought back. */
+    private val startedNew = startId == 0L
+    var id: Long
+        get() = currentId
+        private set(value) {
+            currentId = value
+            if (startedNew) saved?.set(KEY_ID, value)
+        }
     /** Opened as a new note (the + button, or a [[link]] to a note not written yet). */
-    val isNew = startId == 0L
+    val isNew = startId == 0L && restoredId == null
     var title by mutableStateOf(TextFieldValue(startTitle))
         private set
     var body by mutableStateOf(TextFieldValue(""))
@@ -232,7 +256,7 @@ class EditorViewModel(
         private set
 
     /** The note has been read; until then the fields are read-only and nothing is saved. */
-    var loaded by mutableStateOf(startId == 0L)
+    var loaded by mutableStateOf(isNew)
         private set
 
     // Main thread only. Edited since the last real save; drafts don't clear it, only the real save does.
@@ -378,7 +402,8 @@ class EditorViewModel(
                 val (noteId, t, b) = withContext(Dispatchers.Main) { Triple(id, title.text, body.text) }
                 // A new note not saved yet is saved first, so what was typed goes to the bin (and can come back).
                 val binId = when {
-                    noteId == 0L && (t.isNotBlank() || b.isNotBlank()) -> repo.saveDraft(0, t, b)
+                    // (Only if something was typed: an untouched note from a template or a [[link]] is just dropped.)
+                    noteId == 0L && unsaved && (t.isNotBlank() || b.isNotBlank()) -> repo.saveDraft(0, t, b)
                     unsaved && noteId != 0L -> noteId.also { repo.saveDraft(it, t, b) }
                     else -> noteId
                 }
@@ -419,6 +444,26 @@ class EditorViewModel(
 
     private fun TextFieldValue.replacedBy(text: String) =
         TextFieldValue(text, TextRange(selection.start.coerceAtMost(text.length), selection.end.coerceAtMost(text.length)))
+
+    private companion object {
+        const val KEY_ID = "newNoteId"
+    }
+
+    // Last, once every field above is set. A new note from a template: read-only until the template's text is in. Like
+    // a blank new note, it is kept once something is typed or ticked.
+    init {
+        if (isNew && templateId > 0) {
+            loaded = false
+            viewModelScope.launch {
+                repo.get(templateId)?.let { t ->
+                    val (newTitle, newBody) = NoteParser.fromTemplate(t.title, t.body)
+                    if (title.text.isEmpty()) title = TextFieldValue(newTitle)
+                    body = TextFieldValue(newBody, TextRange(newBody.length))
+                }
+                loaded = true
+            }
+        }
+    }
 }
 
 // ---------- To-do ----------

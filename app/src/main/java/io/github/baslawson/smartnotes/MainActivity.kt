@@ -63,6 +63,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.createSavedStateHandle
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -309,11 +310,11 @@ private const val TASKS = "tasks"
 private const val SHOPPING = "shopping"
 private const val SHOPPING_ROUTE = "shopping?list={list}"
 private const val TODO = "todo/{id}"
-private const val NOTE = "note/{id}?title={title}"
+private const val NOTE = "note/{id}?title={title}&template={template}"
 private const val SETTINGS = "settings"
 private const val BIN = "bin"
 
-private fun noteRoute(id: Long, title: String = "") = "note/$id?title=${Uri.encode(title)}"
+private fun noteRoute(id: Long, title: String = "", template: Long = 0L) = "note/$id?title=${Uri.encode(title)}&template=$template"
 
 @Composable
 private fun AppNavHost(nav: NavHostController, app: SmartNotesApp) {
@@ -341,7 +342,7 @@ private fun AppNavHost(nav: NavHostController, app: SmartNotesApp) {
         composable(NOTES) { AccentTheme(Accent.NOTES) {
             val vm = viewModel { NotesViewModel(app.notes, app.bin, app.appScope, app.state, app.settings, app.everywhere) }
             NotesScreen(
-                vm, onOpen = open, onNew = { nav.navigate(noteRoute(0)) },
+                vm, onOpen = open, onNew = { nav.navigate(noteRoute(0, template = it)) },
                 onSettings = { nav.navigate(SETTINGS) }, onBin = { nav.navigate(BIN) }, bottomBar = bottomBar,
                 onOpenTask = openTask, onOpenItem = openItem,
             )
@@ -374,11 +375,13 @@ private fun AppNavHost(nav: NavHostController, app: SmartNotesApp) {
             arguments = listOf(
                 navArgument("id") { type = NavType.LongType },
                 navArgument("title") { type = NavType.StringType; defaultValue = "" },
+                navArgument("template") { type = NavType.LongType; defaultValue = 0L },
             ),
         ) { entry ->
             val id = entry.arguments?.getLong("id") ?: 0L
             val title = entry.arguments?.getString("title").orEmpty()
-            val vm = viewModel { EditorViewModel(app.notes, app.bin, app.appScope, id, title, app.backups.restores) }
+            val template = entry.arguments?.getLong("template") ?: 0L
+            val vm = viewModel { EditorViewModel(app.notes, app.bin, app.appScope, id, title, app.backups.restores, template, createSavedStateHandle()) }
             AccentTheme(Accent.NOTES) {
                 EditorScreen(
                     vm,

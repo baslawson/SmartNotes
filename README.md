@@ -12,13 +12,14 @@ Everything "smart" in a note is read from its plain text, so the text stays the 
 | `#groceries` | a tag (filter by it on the Notes screen) |
 | `[[Trip plan]]` or `[[Trip plan\|shown]]` | a link to the note with that title; the other note lists it under *Linked from* |
 | `- [ ] buy milk` / `- [x] done` | a checkbox, ticked from the note's *Checklist* (it stays in the note; it isn't a to-do task) |
+| `#template` | a template: **+** offers it as the start of a new note (see below) |
 
 **Search everything:** the search box on Notes and the 🔍 on Tasks and Shopping each find notes, tasks and shopping
 items together. Every word typed must start a word in the note, the task (title or details) or the item, capitals
 ignored ("den call" finds "Call the dentist"); matches are highlighted; nothing in the recycle bin is searched. Results
 come under *In Notes*, *In Tasks* and *In Shopping* with how many each found, the section searched from first (on Notes,
 the notes keep their list or grid and the others follow below them). The other sections show their first 5 (*Show
-all* for the rest). A task shows its reminder, steps and whether it's done (tick it there too); an item shows its list
+all* for the rest). A note shows its tags (a template says *Template*); a task shows its reminder, steps and whether it's done (tick it there too); an item shows its list
 and aisle ("Shopping · Fri 14 Nov · Dairy & eggs", "Anytime") and whether it's ticked. A tap opens the note, the task or that day's list. The
 #tag chips filter only notes.
 
@@ -33,7 +34,11 @@ Also: related notes (shared tags and words), and
 title), *A task* (the subject or first line is its title, the rest its details; no reminder is read from shared words) or
 *Shopping for today* (each line of the text an item; bullets, boxes and "1." numbering left off). *Cancel* or Back
 keeps nothing; a tap beside the dialog doesn't.
-**+** opens a new note with the cursor in its text and the keyboard up.
+**+** opens a new note with the cursor in its text and the keyboard up. **Templates:** once any note is tagged
+`#template` (it shows *Template* in the list and in search), **+** asks first: *Blank note* or one of the templates (A–Z).
+A new note from a template starts with its title and text, without the `#template` tag (a line holding only the tag goes;
+other tags stay); like a blank new note, it is kept once something is typed or ticked. The template itself is never
+changed.
 The button left of sort (four squares) shows notes as a **grid** of cards, each as tall as its note (two columns on a
 phone, more on a wider screen), with a longer preview; the list button switches back. The choice is remembered and
 kept in backups. Everything else works the same in both: search, tags, pinned first, long-press to select, ≡ to drag.

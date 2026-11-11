@@ -36,6 +36,41 @@ object NoteParser {
             .filter { tag -> tag.any { it.isLetter() } }
             .toSortedSet()
 
+    /** The tag that makes a note a template ("#template"). */
+    const val TEMPLATE = "template"
+
+    /** A note tagged #template: + on Notes offers it as the start of a new note. */
+    fun isTemplate(title: String, body: String): Boolean = TEMPLATE in tags(title + "\n" + body)
+
+    /**
+     * A new note's title and body from a template's: the same text without its #template tags. A line that held only
+     * the tag goes; elsewhere just the space the tag leaves is closed up. Everything else (other tags, spacing, blank
+     * lines) stays as written.
+     */
+    fun fromTemplate(title: String, body: String): Pair<String, String> {
+        fun isTemplateTag(m: MatchResult) = m.groupValues[1].trimEnd('-', '/').lowercase() == TEMPLATE
+        fun stripLine(line: String): String {
+            var text = line
+            // Again until none is left: "#template#template" only shows its second tag once the first has gone.
+            while (true) {
+                val m = TAG.findAll(text).firstOrNull(::isTemplateTag) ?: return text
+                val before = text.substring(0, m.range.first)
+                val after = text.substring(m.range.last + 1)
+                text = when {
+                    // "a #template b" → "a b"; "#template b" → "b"; "a #template" → "a".
+                    before.endsWith(' ') && (after.startsWith(' ') || after.isEmpty()) -> before.dropLast(1) + after
+                    before.isEmpty() && after.startsWith(' ') -> after.drop(1)
+                    else -> before + after
+                }
+            }
+        }
+        fun strip(text: String): String = text.lines().mapNotNull { line ->
+            val cut = stripLine(line)
+            if (cut != line && cut.isBlank()) null else cut
+        }.joinToString("\n")
+        return strip(title) to strip(body)
+    }
+
     /** Linked note titles, in order of first appearance, without case-insensitive duplicates. */
     fun links(text: String): List<String> =
         LINK.findAll(text)
