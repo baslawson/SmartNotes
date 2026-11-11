@@ -78,3 +78,8 @@ app/schemas/   Room schema per database version (for migrations)
   App info → Battery if reminders arrive late.
 - Only text can be shared in (not images or files).
 - The notification permission is asked once, on first start (Android 13+).
+
+## Licence
+
+Copyright (C) 2026 baslawson. SmartNotes is free software, licensed under the GNU General Public License,
+version 3 only (GPL-3.0-only). The full text is in [LICENSE](LICENSE). It comes with no warranty.
