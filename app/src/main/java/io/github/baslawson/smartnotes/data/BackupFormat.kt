@@ -14,6 +14,10 @@ data class BackupData(
     val items: List<ShoppingItem>,
     val history: List<ShoppingHistory>,
     val settings: Map<String, Any?>,
+    /** The aisles chosen for items; null: a file from before aisles (a restore keeps the ones there are). */
+    val aisles: List<ItemAisle>? = null,
+    /** Staples; null: a file from before staples (a restore keeps the ones there are). */
+    val staples: List<Staple>? = null,
 ) {
     /** "42 notes, 7 tasks, 3 shopping lists": what is in use (not in the recycle bin). */
     fun summary(): String {
@@ -66,6 +70,10 @@ object BackupFormat {
         put("shoppingHistory", JSONArray(data.history.map { h ->
             JSONObject().put("key", h.key).put("name", h.name).put("useCount", h.useCount).put("lastUsed", h.lastUsed)
         }))
+        data.aisles?.let { a -> put("aisles", JSONArray(a.map { JSONObject().put("key", it.key).put("aisle", it.aisle) })) }
+        data.staples?.let { st ->
+            put("staples", JSONArray(st.map { JSONObject().put("key", it.key).put("name", it.name).put("quantity", it.quantity).put("addedAt", it.addedAt) }))
+        }
         put("settings", JSONObject(data.settings.filterValues { it != null }))
     }.toString(2)
 
@@ -111,10 +119,17 @@ object BackupFormat {
             val history = root.objects("shoppingHistory").map { o ->
                 ShoppingHistory(o.text("key"), o.text("name"), o.optInt("useCount", 1), o.optLong("lastUsed"))
             }
+            // Added in 0.8.0 (same format version): older files have neither, and keep what the app has on restore.
+            val aisles = if (root.has("aisles")) root.objects("aisles").map { o -> ItemAisle(o.text("key"), o.text("aisle")) } else null
+            val staples = if (root.has("staples")) root.objects("staples").map { o ->
+                Staple(o.text("key"), o.text("name"), o.optString("quantity"), o.optLong("addedAt"))
+            } else null
+            if (aisles != null && aisles.map { it.key }.toSet().size != aisles.size) throw BackupException(DAMAGED)
+            if (staples != null && staples.map { it.key }.toSet().size != staples.size) throw BackupException(DAMAGED)
             val settings = root.optJSONObject("settings")?.let { s -> s.keys().asSequence().associateWith { s.opt(it) } }.orEmpty()
             requireUnique(notes.map { it.id }, todos.map { it.id }, lists.map { it.id }, items.map { it.id })
             if (history.map { it.key }.toSet().size != history.size) throw BackupException(DAMAGED)
-            return BackupData(root.optLong("createdAt"), root.optString("appVersion"), notes, todos, lists, items, history, settings)
+            return BackupData(root.optLong("createdAt"), root.optString("appVersion"), notes, todos, lists, items, history, settings, aisles, staples)
         } catch (e: JSONException) {
             throw BackupException(DAMAGED)
         }

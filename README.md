@@ -19,7 +19,7 @@ ignored ("den call" finds "Call the dentist"); matches are highlighted; nothing 
 come under *In Notes*, *In Tasks* and *In Shopping* with how many each found, the section searched from first (on Notes,
 the notes keep their list or grid and the others follow below them). The other sections show their first 5 (*Show
 all* for the rest). A task shows its reminder, steps and whether it's done (tick it there too); an item shows its list
-("Shopping · Fri 14 Nov", "Anytime") and whether it's ticked. A tap opens the note, the task or that day's list. The
+and aisle ("Shopping · Fri 14 Nov · Dairy & eggs", "Anytime") and whether it's ticked. A tap opens the note, the task or that day's list. The
 #tag chips filter only notes.
 
 **Widgets** (long-press the home screen → Widgets → SmartNotes): *Today's tasks* lists open tasks due today or
@@ -79,6 +79,16 @@ added twice. The reminder lists what is still to buy. **Long-press items** to se
 the other day already has isn't added twice: it takes the moved quantity (unless only it had one) and is still to buy
 if either was.
 
+**Aisles:** every item is in an aisle of the shop (Fruit & veg, Bakery, Meat & fish, Dairy & eggs, Frozen, Pantry,
+Breakfast, Snacks & sweets, Drinks, Household, Health & beauty, Baby & pets, or Other), guessed from its name by a
+starter word list (English; "peanut butter" is Pantry, "oat milk" Dairy & eggs). Long-press items → ⋮ → **Aisle…** to
+put them in another one (remembered for that name on every list; *By name* goes back to the guess). The **By aisle**
+sort shows the items under their aisles, in the shop's order, A–Z within each.
+
+**Staples:** long-press items → ⋮ → **Staple** makes them things you buy again and again (a ★ beside them; *Not a
+staple* undoes it). **Add staples (n)** under the add box puts every staple not already to buy on the day shown (on
+today, Anytime's count too), with the quantity it had when made a staple; a ticked one comes back unticked.
+
 Shopping opens on the day you looked at last (today if that day has gone by). The 🔍 at the right of the add box
 searches everything (see *Search everything*; for what is typed, if anything): items first, from every list in use,
 past ones too, still to buy before ticked, each with its day; a tap opens that day. What a past day still has to buy carries over to
@@ -110,7 +120,7 @@ The sort button (three lines) on Notes, Tasks and Shopping picks the order, reme
 |---|---|---|
 | Notes | Last edited, Created, Title A–Z, My order | pinned notes stay on top |
 | Tasks | Priority, Due date (a date without a time counts as 9:00), By day (under Overdue, Today, Tomorrow, This week, Later and No date; no dragging), Newest, A–Z, My order | done tasks stay below |
-| Shopping items | Added, A–Z, My order | ticked items stay below |
+| Shopping items | Added, A–Z, By aisle (under each aisle; no dragging), My order | ticked items stay below |
 
 Each row has a handle (≡): drag it to move the row (pinned notes among the pinned). Dropping it makes the order you
 see, with that move, *My order*, and the sort switches to it. Choosing My order from the menu the first time starts
@@ -127,7 +137,7 @@ and for Shopping. *Clear done* and *Clear ticked* work either way.
 ## Selecting, deleting and the recycle bin
 
 Long-press a note, task or shopping item to select it; tap more to add them; the top bar then has
-*Select all* and *Delete* (shopping items also *Move to…* another day; ✕ or Back stops selecting). Deleting, here or from a note's or task's own screen, moves
+*Select all* and *Delete* (shopping items also *Move to…* another day, and ⋮ *Aisle…* and *Staple*; ✕ or Back stops selecting). Deleting, here or from a note's or task's own screen, moves
 things to the **recycle bin** (reminders cancelled) and shows *Undo* for a moment; ✕ on a single shopping item removes
 it at once, also with *Undo*. The bin (Notes ⋮ menu, or Settings → Recycle bin) lists deleted notes, tasks and lists
 with the days left; tap one to *Restore* or *Delete forever*, long-press to do several, or *Empty bin*. Settings →
@@ -137,7 +147,8 @@ starts. A restored list whose day has another list by now puts its items on that
 ## Backup
 
 Settings → Backup. **Back up now** saves one file (`SmartNotes-backup-<date-time>.json`, readable JSON) wherever you
-pick: all notes, tasks and shopping lists (the recycle bin too), shopping suggestions and the settings. Not in it: the
+pick: all notes, tasks and shopping lists (the recycle bin too), shopping suggestions, the aisles chosen for items,
+staples and the settings (a backup from before 0.8.0 has no aisles or staples; restoring it keeps the ones there are). Not in it: the
 debug log, update state and alarms (set again from the tasks and lists). **Restore from file** checks the file first
 (not a backup, damaged, or from a newer SmartNotes: refused), says what it holds and asks, then **replaces everything**
 in the app in one go. A copy of what was there is kept first (the last 3), so **Undo last restore** puts it back.
@@ -211,7 +222,7 @@ back are on.
 
 ```
 app/src/main/java/io/github/baslawson/smartnotes/
-  parse/       NoteParser (tags, links, checkboxes), Search, Related, Shopping: plain Kotlin, unit tested
+  parse/       NoteParser (tags, links, checkboxes), Search, Related, Shopping, Aisles (the aisle word list): plain Kotlin, unit tested
   data/        Room entities and DAOs, Note/Todo/Shopping repositories, RecycleBin, Backups and BackupFormat,
                Updates (GitHub releases)
   reminders/   ReminderRules (sounds, repeat, snooze, alarm planning; unit tested), AlarmScheduler and receivers,

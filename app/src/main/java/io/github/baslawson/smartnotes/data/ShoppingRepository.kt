@@ -1,6 +1,7 @@
 package io.github.baslawson.smartnotes.data
 
 import io.github.baslawson.smartnotes.AppLog
+import io.github.baslawson.smartnotes.parse.Aisle
 import io.github.baslawson.smartnotes.parse.Shopping
 import io.github.baslawson.smartnotes.reminders.AlarmPlanner
 import io.github.baslawson.smartnotes.reminders.AlarmScheduler
@@ -66,6 +67,44 @@ class ShoppingRepository(
 
     suspend fun setChecked(item: ShoppingItem, checked: Boolean) = lock.withLock {
         dao.setChecked(item.id, checked, if (checked) clock.millis() else 0)
+    }
+
+    /** The aisles chosen for items ("Aisle…"), by item key. */
+    fun observeAisles(): Flow<Map<String, Aisle>> =
+        dao.observeAisles().map { rows -> rows.mapNotNull { r -> Aisle.of(r.aisle)?.let { r.key to it } }.toMap() }
+
+    /** Puts the items with [keys] in [aisle] wherever they are; null: back to the word list's guess. */
+    suspend fun setAisle(keys: Collection<String>, aisle: Aisle?) = lock.withLock {
+        if (aisle == null) dao.clearAisles(keys.toList()) else dao.setAisles(keys.map { ItemAisle(it, aisle.name) })
+        AppLog.i("Shopping", "Aisle of ${keys.size} item(s): ${aisle?.name ?: "by name"}")
+    }
+
+    fun observeStaples(): Flow<List<Staple>> = dao.observeStaples()
+
+    /** Makes [items] staples (with their quantity), or ([staple] false) not staples any more. */
+    suspend fun setStaple(items: List<ShoppingItem>, staple: Boolean) = lock.withLock {
+        val now = clock.millis()
+        if (staple) dao.putStaples(items.distinctBy { it.key }.map { Staple(it.key, it.name, it.quantity, now) })
+        else dao.dropStaples(items.map { it.key })
+        AppLog.i("Shopping", (if (staple) "Made staples: " else "No longer staples: ") + items.size)
+    }
+
+    /**
+     * "Add staples": every staple not already to buy on [date]'s list (null: Anytime), nor on today on Anytime (shown
+     * there too), goes on that list with its own quantity, its list made if need be. Returns how many were added.
+     */
+    suspend fun addStaples(date: LocalDate?): Int = lock.withLock {
+        val staples = dao.allStaples()
+        val existing = if (date == null) 1L else dao.allLists().firstOrNull { it.date == date.toString() }?.id
+        val anytime = if (date == LocalDate.now(clock)) dao.openItems(1L).map { it.key } else emptyList()
+        val open = existing?.let { id -> dao.openItems(id).map { it.key } }.orEmpty().toSet() + anytime
+        val toAdd = staples.filter { it.key !in open }
+        if (toAdd.isEmpty()) return@withLock 0
+        val id = existing ?: listForDateUnlocked(date!!)
+        val now = clock.millis()
+        toAdd.forEach { dao.addItem(id, it.name, it.quantity, now, exactQuantity = true) }
+        AppLog.i("Shopping", "Added ${toAdd.size} staple(s) to list $id")
+        toAdd.size
     }
 
     /** A tick on the shopping widget's line for item [id] on list [listId] (see [ShoppingDao.tickFromWidget]). */

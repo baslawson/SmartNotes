@@ -25,6 +25,8 @@ import androidx.compose.ui.unit.dp
 import io.github.baslawson.smartnotes.data.ShoppingItem
 import io.github.baslawson.smartnotes.data.ShoppingList
 import io.github.baslawson.smartnotes.data.Todo
+import io.github.baslawson.smartnotes.parse.Aisle
+import io.github.baslawson.smartnotes.parse.Aisles
 
 /** One line of the search results: a section's heading, a note, a task, an item, "Show all", or "nothing here". */
 sealed interface Hit {
@@ -33,7 +35,7 @@ sealed interface Hit {
     data class Head(val section: Section, val count: Int) : Hit { override val key get() = "s:${section.name}" }
     data class NoteHit(val row: NoteRow) : Hit { override val key get() = "n:${row.note.id}" }
     data class TaskHit(val todo: Todo) : Hit { override val key get() = "t:${todo.id}" }
-    data class ItemHit(val item: ShoppingItem, val list: ShoppingList) : Hit { override val key get() = "i:${item.id}" }
+    data class ItemHit(val item: ShoppingItem, val list: ShoppingList, val aisle: Aisle = Aisle.OTHER) : Hit { override val key get() = "i:${item.id}" }
     data class More(val section: Section, val hidden: Int) : Hit { override val key get() = "m:${section.name}" }
     data class NoneIn(val section: Section) : Hit { override val key get() = "z:${section.name}" }
 }
@@ -60,7 +62,7 @@ object Hits {
             when (section) {
                 Section.NOTES -> found.notes.take(shown).forEach { add(Hit.NoteHit(it)) }
                 Section.TASKS -> found.tasks.take(shown).forEach { add(Hit.TaskHit(it)) }
-                Section.SHOPPING -> found.items.take(shown).forEach { (item, list) -> add(Hit.ItemHit(item, list)) }
+                Section.SHOPPING -> found.items.take(shown).forEach { (item, list) -> add(Hit.ItemHit(item, list, Aisles.of(item.key, item.name, found.aisles))) }
             }
             if (shown < count) add(Hit.More(section, count - shown))
         }
@@ -122,13 +124,13 @@ fun HitLine(hit: Hit, terms: List<String>, actions: HitActions) {
         is Hit.TaskHit -> RowCard(faded = hit.todo.done) {
             TodoLine(hit.todo, onCheck = { actions.checkTask(hit.todo, it) }, Modifier.clickable { actions.openTask(hit.todo.id) }, terms)
         }
-        is Hit.ItemHit -> RowCard(faded = hit.item.checked) { ItemHitLine(hit.item, hit.list, terms, actions) }
+        is Hit.ItemHit -> RowCard(faded = hit.item.checked) { ItemHitLine(hit.item, hit.list, hit.aisle, terms, actions) }
     }
 }
 
-/** A shopping item found: its name, quantity and the list it's on ("Shopping · Fri 14 Nov"), ticked or not. */
+/** A shopping item found: its name, quantity, the list it's on and its aisle ("Shopping · Fri 14 Nov · Dairy & eggs"), ticked or not. */
 @Composable
-private fun ItemHitLine(item: ShoppingItem, list: ShoppingList, terms: List<String>, actions: HitActions) {
+private fun ItemHitLine(item: ShoppingItem, list: ShoppingList, aisle: Aisle, terms: List<String>, actions: HitActions) {
     val style = LocalDateStyle.current
     Row(
         Modifier.fillMaxWidth().clickable { actions.openItem(item, list) }.padding(horizontal = 16.dp, vertical = 10.dp),
@@ -141,7 +143,7 @@ private fun ItemHitLine(item: ShoppingItem, list: ShoppingList, terms: List<Stri
                 color = if (item.checked) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
             )
             Text(
-                "Shopping · ${list.label(style)}" + if (item.checked) " · ticked" else "",
+                "Shopping · ${list.label(style)}" + (if (aisle != Aisle.OTHER) " · ${aisle.label}" else "") + if (item.checked) " · ticked" else "",
                 style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }

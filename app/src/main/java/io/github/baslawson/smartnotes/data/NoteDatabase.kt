@@ -13,9 +13,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 @Database(
     entities = [
         Note::class, NoteFts::class, ShoppingItem::class, ShoppingHistory::class,
-        ShoppingList::class, Todo::class, AlarmEntry::class,
+        ShoppingList::class, Todo::class, AlarmEntry::class, ItemAisle::class, Staple::class,
     ],
-    version = 4,
+    version = 5,
     exportSchema = true,
     autoMigrations = [
         AutoMigration(from = 1, to = 2, spec = NoteDatabase.To2::class),
@@ -23,6 +23,8 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         AutoMigration(from = 2, to = 3, spec = NoteDatabase.To3::class),
         // Version 4: a position on notes, tasks, shopping lists and items, for "My order".
         AutoMigration(from = 3, to = 4),
+        // Version 5: the aisle chosen for an item, and staples (two new tables).
+        AutoMigration(from = 4, to = 5),
     ],
 )
 abstract class NoteDatabase : RoomDatabase() {

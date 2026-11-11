@@ -25,6 +25,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material3.RadioButton
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.DateRange
@@ -155,6 +159,8 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.ui.text.input.TextFieldValue
 import io.github.baslawson.smartnotes.parse.Shopping
+import io.github.baslawson.smartnotes.parse.Aisle
+import io.github.baslawson.smartnotes.parse.Aisles
 import io.github.baslawson.smartnotes.parse.Search
 import io.github.baslawson.smartnotes.parse.TaskSteps
 import kotlinx.coroutines.delay
@@ -731,14 +737,18 @@ fun ShoppingScreen(
     val showTicked by vm.showTicked.collectAsStateWithLifecycle()
     // One per day: switching days ends a party that belongs to the last one.
     val party = remember(day) { Celebration() }
-    val open = Sorting.items(state.items.filter { !it.checked }, itemSort)
+    val aisles by vm.aisles.collectAsStateWithLifecycle()
+    val staples by vm.staples.collectAsStateWithLifecycle()
+    val stapleKeys = staples.map { it.key }.toSet()
+    val open = Sorting.items(state.items.filter { !it.checked }, itemSort, aisles)
     val checked = state.items.filter { it.checked }
     // On today: what is on Anytime shows below, to tick off in the shop too.
-    val anytimeOpen = if (day == today) Sorting.items(state.anytime.filter { !it.checked }, itemSort) else emptyList()
+    val anytimeOpen = if (day == today) Sorting.items(state.anytime.filter { !it.checked }, itemSort, aisles) else emptyList()
     val selection = vm.selection
     val shown = open + (if (showTicked) checked else emptyList()) + anytimeOpen
     LaunchedEffect(shown.map { it.id }) { if (state.loaded) selection.keepOnly(shown.map { it.id }) }
     var moving by rememberSaveable { mutableStateOf(false) }
+    var choosingAisle by rememberSaveable { mutableStateOf(false) }
     val openCounts by vm.openCounts.collectAsStateWithLifecycle()
     // Days with something still to buy: a dot in the strip.
     val marked = state.lists.mapNotNull { l -> parseDate(l.date)?.takeIf { (openCounts[l.id] ?: 0) > 0 } }.toSet()
@@ -752,6 +762,11 @@ fun ShoppingScreen(
             if (selection.active) SelectionBar(selection, shown.map { it.id }) {
                 IconButton(onClick = { moving = true }) { Icon(Icons.Default.DateRange, contentDescription = "Move to another day") }
                 IconButton(onClick = { vm.deleteSelected(shown) }) { Icon(Icons.Default.Delete, contentDescription = "Remove items") }
+                val picked = shown.filter { it.id in selection.ids }
+                ItemMenu(
+                    allStaples = picked.isNotEmpty() && picked.all { it.key in stapleKeys },
+                    onAisle = { choosingAisle = true }, onStaple = { vm.toggleStapleSelected(shown) },
+                )
             } else if (query != null) SearchTopBar(query.orEmpty(), "Search everything", { vm.searchQuery.value = it }) { vm.searchQuery.value = null }
             else TopAppBar(
                 title = { Text("Shopping") },
@@ -819,6 +834,16 @@ fun ShoppingScreen(
                 )
                 SuggestionsPopup(if (focused && !selection.active && !moving) suggestions else emptyList(), vm.input, fieldWidth, onPick = vm::pick, onForget = { vm.forget(it) })
             }
+            // Staples not on the list yet (still to buy): one tap adds them all.
+            val onList = open.map { it.key }.toSet() + anytimeOpen.map { it.key }
+            val missing = staples.count { it.key !in onList }
+            // Only once the day shown has its items in (not the last day's, just after switching).
+            if (state.loaded && state.itemsOf == listId && missing > 0 && !selection.active) {
+                TextButton(onClick = { vm.addStaples() }, Modifier.padding(start = 8.dp)) {
+                    Icon(Icons.Default.Star, contentDescription = null, Modifier.size(18.dp))
+                    Text("Add staples ($missing)", Modifier.padding(start = 6.dp))
+                }
+            }
             if (state.loaded && state.items.isEmpty() && anytimeOpen.isEmpty()) {
                 val d = day
                 if (d == null) EmptyState(Icons.Default.ShoppingCart, "Nothing on Anytime", "Things to buy whenever go here.\nThey show on today's list too.")
@@ -826,7 +851,8 @@ fun ShoppingScreen(
                 return@Column
             }
             val scroll = rememberLastScroll("shopping:${day ?: ANYTIME}")
-            val canArrange = !selection.active
+            // "By aisle" shows the items under their aisles: nothing to drag there.
+            val canArrange = !selection.active && itemSort != ItemSort.AISLE
             val byId = open.associateBy { it.id }
             val order = key(listId) { rememberDragOrder(open.map { it.id }, itemSort == ItemSort.MINE) }
             val reorder = rememberReorderableLazyListState(scroll) { from, to ->
@@ -837,9 +863,18 @@ fun ShoppingScreen(
             }
             LazyColumn(Modifier.fillMaxSize(), scroll, contentPadding = PaddingValues(bottom = 24.dp)) {
                 item(key = "tip") {
-                    OneTimeTip("shopping-week", "Tap a day to plan its shopping. Long-press items to move them to another day; tap one to rename it. Things not bought move to today by themselves.")
+                    OneTimeTip("shopping-week", "Tap a day to plan its shopping. Long-press items to move them to another day, set their aisle or make them staples; tap one to rename it. Things not bought move to today by themselves.")
                 }
-                items(order.ids.mapNotNull { byId[it] }, key = { it.id }) { item ->
+                // "By aisle": each aisle's heading, then its items.
+                val rows: List<Any> = if (itemSort == ItemSort.AISLE) {
+                    Sorting.itemAisles(open, aisles).flatMap { (aisle, items) -> listOf(AisleHead(aisle, items.size)) + items }
+                } else order.ids.mapNotNull { byId[it] }
+                items(rows, key = { r -> if (r is AisleHead) "aisle:${r.aisle.name}" else (r as ShoppingItem).id }) { row ->
+                    if (row is AisleHead) {
+                        AisleHeader(row.aisle, row.count)
+                        return@items
+                    }
+                    val item = row as ShoppingItem
                     ReorderableItem(reorder, key = item.id, enabled = canArrange) { dragging ->
                         val check: (Boolean) -> Unit = { now ->
                             // Ticking off the last thing to buy: a little party.
@@ -849,7 +884,7 @@ fun ShoppingScreen(
                         // Swipe right to tick, left to remove.
                         SwipeActions(!selection.active && !dragging, item.checked, onTick = { check(true) }, onDelete = { vm.delete(item) }) { actions ->
                             RowCard(dragging = dragging) {
-                                ItemLine(item, selection, onCheck = check, onDelete = { vm.delete(item) }, onEdit = { renamingId = item.id }, onStep = { vm.step(item, it) }, actions = actions) {
+                                ItemLine(item, selection, onCheck = check, onDelete = { vm.delete(item) }, onEdit = { renamingId = item.id }, onStep = { vm.step(item, it) }, actions = actions, staple = item.key in stapleKeys) {
                                     if (canArrange) DragHandleIcon(item.name, Modifier.draggableHandle(onDragStarted = { order.start() }, onDragStopped = { order.stop()?.let(vm::arrangeItems) }).padding(12.dp))
                                 }
                             }
@@ -866,7 +901,7 @@ fun ShoppingScreen(
                     items(anytimeOpen, key = { "a:${it.id}" }) { item ->
                         SwipeActions(!selection.active, item.checked, onTick = { vm.setChecked(item, true) }, onDelete = { vm.delete(item) }) { actions ->
                             RowCard(faded = true) {
-                                ItemLine(item, selection, onCheck = { vm.setChecked(item, it) }, onDelete = { vm.delete(item) }, onEdit = { renamingId = item.id }, onStep = { vm.step(item, it) }, actions = actions)
+                                ItemLine(item, selection, onCheck = { vm.setChecked(item, it) }, onDelete = { vm.delete(item) }, onEdit = { renamingId = item.id }, onStep = { vm.step(item, it) }, actions = actions, staple = item.key in stapleKeys)
                             }
                         }
                     }
@@ -882,7 +917,7 @@ fun ShoppingScreen(
                         // Ticked already: swiping right unticks it.
                         SwipeActions(!selection.active, item.checked, onTick = { vm.setChecked(item, false) }, onDelete = { vm.delete(item) }) { actions ->
                             RowCard(faded = true) {
-                                ItemLine(item, selection, onCheck = { vm.setChecked(item, it) }, onDelete = { vm.delete(item) }, onEdit = { renamingId = item.id }, onStep = { vm.step(item, it) }, actions = actions)
+                                ItemLine(item, selection, onCheck = { vm.setChecked(item, it) }, onDelete = { vm.delete(item) }, onEdit = { renamingId = item.id }, onStep = { vm.step(item, it) }, actions = actions, staple = item.key in stapleKeys)
                             }
                         }
                     }
@@ -913,6 +948,15 @@ fun ShoppingScreen(
         onMove = { to -> moving = false; vm.moveSelected(shown, to, shortDay(to, today)) },
         onDismiss = { moving = false },
     )
+    if (choosingAisle && selection.active) {
+        val picked = shown.filter { it.id in selection.ids }
+        val current = picked.map { Aisles.of(it.key, it.name, aisles) }.toSet().singleOrNull()
+        AisleDialog(
+            count = picked.size, current = current,
+            onPick = { aisle -> choosingAisle = false; vm.setAisleSelected(shown, aisle) },
+            onDismiss = { choosingAisle = false },
+        )
+    }
     renaming?.let { item ->
         val others = (if (item.listId == 1L) state.anytime else state.items).filter { it.id != item.id }.map { it.key }.toSet()
         EditItemDialog(item, others = others, onSave = { vm.rename(item, it) }) { renamingId = null }
@@ -1366,6 +1410,59 @@ private fun ShoppingListDialog(
  * An item: only the box ticks; a tap on the name renames it (no ticking by accident while scrolling or dragging); a long
  * press selects it (to move to another day, or remove), after which taps select too.
  */
+/** A heading row of "By aisle" in the list. */
+private data class AisleHead(val aisle: Aisle, val count: Int)
+
+/** A heading of "By aisle": the aisle and how many items are in it. */
+@Composable
+private fun AisleHeader(aisle: Aisle, count: Int) {
+    Text(
+        "${aisle.label} ($count)", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(start = 20.dp, top = 12.dp, bottom = 4.dp).semantics { heading() },
+    )
+}
+
+/** ⋮ while items are selected: their aisle, and making them staples (or not). */
+@Composable
+private fun ItemMenu(allStaples: Boolean, onAisle: () -> Unit, onStaple: () -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { open = true }) { Icon(Icons.Default.MoreVert, contentDescription = "More") }
+        DropdownMenu(open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(text = { Text("Aisle…") }, onClick = { open = false; onAisle() })
+            DropdownMenuItem(text = { Text(if (allStaples) "Not a staple" else "Staple") }, onClick = { open = false; onStaple() })
+        }
+    }
+}
+
+/**
+ * Long-press → Aisle…: one of the aisles for the [count] selected items ([current]: the one they share, if any), or
+ * "By name" (the word list decides again).
+ */
+@Composable
+private fun AisleDialog(count: Int, current: Aisle?, onPick: (Aisle?) -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (count == 1) "Aisle" else "Aisle for $count items") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                Aisle.entries.forEach { aisle ->
+                    Row(
+                        Modifier.fillMaxWidth().selectable(selected = aisle == current, role = Role.RadioButton) { onPick(aisle) }.padding(vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(selected = aisle == current, onClick = null)
+                        Text(aisle.label, Modifier.padding(start = 12.dp))
+                    }
+                }
+                TextButton(onClick = { onPick(null) }) { Text("By name (as the app guesses)") }
+            }
+        },
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
 @Composable
 private fun ItemLine(
     item: ShoppingItem,
@@ -1375,6 +1472,7 @@ private fun ItemLine(
     onEdit: () -> Unit,
     onStep: (Int) -> Unit = {},
     actions: Modifier = Modifier,
+    staple: Boolean = false,
     handle: @Composable () -> Unit = {},
 ) {
     // Tap the quantity for – / + (they go again after a few seconds untouched).
@@ -1389,6 +1487,7 @@ private fun ItemLine(
             textDecoration = if (item.checked) TextDecoration.LineThrough else null,
             color = if (item.checked) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
         )
+        if (staple) Icon(Icons.Default.Star, contentDescription = "Staple", Modifier.padding(horizontal = 4.dp).size(16.dp), tint = MaterialTheme.colorScheme.primary)
         if (stepping && canStep) {
             IconButton(onClick = { onStep(-1) }, Modifier.semantics { contentDescription = "One less ${item.name}" }) {
                 Text("−", style = MaterialTheme.typography.titleLarge)

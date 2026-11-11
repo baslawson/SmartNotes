@@ -13,6 +13,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.swipeLeft
 import androidx.compose.ui.test.swipeRight
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -211,5 +212,37 @@ class InputAndSwipeTest {
         compose.onNodeWithText("item $word").performClick()
         until { compose.onAllNodesWithText("item $word").fetchSemanticsNodes().isNotEmpty() && compose.onAllNodesWithText("In Shopping (1)").fetchSemanticsNodes().isEmpty() }
         compose.onNode(hasText("Shopping") and hasClickAction()).assertExists()
+    }
+
+    @Test fun longPressSetsAnAisleAndMakesAStaple() {
+        tab("Shopping")
+        compose.waitForIdle()
+        if (compose.onAllNodesWithText("Go to today").fetchSemanticsNodes().isNotEmpty()) {
+            compose.onAllNodesWithText("Go to today")[0].performClick()
+            compose.waitForIdle()
+        }
+        val name = "zorbleberry$run"
+        compose.onNode(hasSetTextAction()).performTextInput(name)
+        compose.onNode(hasSetTextAction()).performImeAction()
+        val list = runBlocking { app.shopping.listForDate(LocalDate.now()) }
+        val key = name.lowercase()
+        until { runBlocking { app.shopping.observeItems(list).first().any { it.name == name } } }
+        // Long-press → ⋮ → Aisle… → Frozen.
+        compose.onNodeWithText(name).performTouchInput { longClick() }
+        compose.onNodeWithContentDescription("More").performClick()
+        compose.onNodeWithText("Aisle…").performClick()
+        compose.onNodeWithText("Frozen").performClick()
+        until { runBlocking { app.shopping.observeAisles().first()[key] } == io.github.baslawson.smartnotes.parse.Aisle.FROZEN }
+        // Long-press → ⋮ → Staple: starred, and a staple.
+        compose.onNodeWithText(name).performTouchInput { longClick() }
+        compose.onNodeWithContentDescription("More").performClick()
+        compose.onNodeWithText("Staple").performClick()
+        until { runBlocking { app.shopping.observeStaples().first().any { it.key == key } } }
+        // Tidy up: not a staple any more (the emulator's data stays between runs), aisle back to the guess.
+        compose.onNodeWithText(name).performTouchInput { longClick() }
+        compose.onNodeWithContentDescription("More").performClick()
+        compose.onNodeWithText("Not a staple").performClick()
+        until { runBlocking { app.shopping.observeStaples().first().none { it.key == key } } }
+        runBlocking { app.shopping.setAisle(listOf(key), null) }
     }
 }

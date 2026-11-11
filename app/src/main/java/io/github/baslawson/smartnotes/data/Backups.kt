@@ -89,6 +89,7 @@ class Backups(
             // An item whose list is gone can't be shown anyway; left out, so the file is one this app reads back.
             items = db.shopping().allItems().filter { it.listId in listIds }, history = db.shopping().allHistory(),
             settings = settings.export(),
+            aisles = db.shopping().allAisles(), staples = db.shopping().allStaples(),
         )
     }
 
@@ -238,6 +239,9 @@ class Backups(
             db.shopping().insertLists(lists.map { if (it.id == 1L) it.copy(deletedAt = null) else it })
             db.shopping().insertItems(data.items)
             db.shopping().insertHistory(data.history)
+            // A file from before aisles and staples (0.8.0) leaves the ones there are.
+            data.aisles?.let { db.shopping().deleteAllAisles(); db.shopping().setAisles(it) }
+            data.staples?.let { db.shopping().deleteAllStaples(); db.shopping().putStaples(it) }
         }
         settings.import(data.settings)
     }

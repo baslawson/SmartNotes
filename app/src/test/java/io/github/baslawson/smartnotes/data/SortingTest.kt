@@ -91,4 +91,17 @@ class SortingTest {
         assertEquals(listOf(4L, 1L, 2L, 3L), Sorting.move(listOf(1, 2, 3, 4), 4, 1))
         assertEquals(listOf(1L, 2L), Sorting.move(listOf(1, 2), 1, 9))
     }
+
+    @Test fun itemsByAisleInTheShopsOrderThenAToZ() {
+        val items = listOf(
+            ShoppingItem(1, 2, "Milk", "milk", addedAt = 1), ShoppingItem(2, 2, "tea", "tea", addedAt = 2),
+            ShoppingItem(3, 2, "apples", "apples", addedAt = 3), ShoppingItem(4, 2, "birthday card", "birthday card", addedAt = 4),
+            ShoppingItem(5, 2, "bananas", "bananas", addedAt = 5), ShoppingItem(6, 2, "cheese", "cheese", addedAt = 6),
+        )
+        val chosen = mapOf("cheese" to io.github.baslawson.smartnotes.parse.Aisle.SNACKS)
+        assertEquals(listOf(3L, 5L, 1L, 2L, 6L, 4L), Sorting.items(items, ItemSort.AISLE, chosen).map { it.id })
+        val groups = Sorting.itemAisles(items, chosen)
+        assertEquals(listOf("Fruit & veg", "Dairy & eggs", "Breakfast", "Snacks & sweets", "Other"), groups.map { it.first.label })
+        assertEquals(listOf(3L, 5L), groups.first().second.map { it.id })
+    }
 }

@@ -5,6 +5,7 @@ import java.time.ZoneId
 import java.time.LocalDate
 import io.github.baslawson.smartnotes.parse.Shopping
 import androidx.room.Insert
+import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Transaction
 import androidx.room.Update
@@ -160,7 +161,7 @@ interface ShoppingDao {
      * the list isn't there.
      */
     @Transaction
-    suspend fun addItem(listId: Long, name: String, quantity: String, now: Long): Boolean? {
+    suspend fun addItem(listId: Long, name: String, quantity: String, now: Long, exactQuantity: Boolean = false): Boolean? {
         if (list(listId).let { it == null || it.deletedAt != null }) return null
         val key = Shopping.key(name)
         val existing = findByKey(listId, key)
@@ -171,7 +172,8 @@ interface ShoppingDao {
         } else {
             update(
                 existing.copy(
-                    quantity = quantity.ifEmpty { existing.quantity },
+                    // A staple comes back with its own quantity (none, if it had none).
+                    quantity = if (exactQuantity) quantity else quantity.ifEmpty { existing.quantity },
                     checked = false,
                     addedAt = if (existing.checked) now else existing.addedAt,
                 )
@@ -309,6 +311,38 @@ interface ShoppingDao {
             "ORDER BY i.checked, i.name COLLATE NOCASE"
     )
     fun search(pattern: String): Flow<List<ShoppingItem>>
+
+    // ---------- Aisles and staples ----------
+
+    @Query("SELECT * FROM item_aisles")
+    fun observeAisles(): Flow<List<ItemAisle>>
+
+    @Query("SELECT * FROM item_aisles")
+    suspend fun allAisles(): List<ItemAisle>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun setAisles(aisles: List<ItemAisle>)
+
+    @Query("DELETE FROM item_aisles WHERE `key` IN (:keys)")
+    suspend fun clearAisles(keys: List<String>)
+
+    @Query("DELETE FROM item_aisles")
+    suspend fun deleteAllAisles()
+
+    @Query("SELECT * FROM staples ORDER BY addedAt, `key`")
+    fun observeStaples(): Flow<List<Staple>>
+
+    @Query("SELECT * FROM staples ORDER BY addedAt, `key`")
+    suspend fun allStaples(): List<Staple>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun putStaples(staples: List<Staple>)
+
+    @Query("DELETE FROM staples WHERE `key` IN (:keys)")
+    suspend fun dropStaples(keys: List<String>)
+
+    @Query("DELETE FROM staples")
+    suspend fun deleteAllStaples()
 
     /**
      * A tick on the shopping widget's line for item [id] on list [listId], in one go: the item and the copies of its

@@ -278,8 +278,8 @@ object Widgets {
             val relevant = WidgetData.listsForToday(lists, today)
             val items = if (relevant.isEmpty()) flowOf(emptyList())
                 else combine(relevant.map { app.shopping.observeItems(it.id) }) { all -> all.flatMap { it.toList() } }
-            combine(items, app.settings.itemSort) { all, sort ->
-                WidgetData.todayList(lists, today)?.id to WidgetData.toBuyToday(lists, all, today, sort)
+            combine(items, app.settings.itemSort, app.shopping.observeAisles()) { all, sort, aisles ->
+                WidgetData.todayList(lists, today)?.id to WidgetData.toBuyToday(lists, all, today, sort, aisles = aisles)
             }
         }
 

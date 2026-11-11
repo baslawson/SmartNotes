@@ -44,6 +44,15 @@ class EverywhereTest {
         assertEquals(listOf(1L), collect("oat mil", items).items.map { it.first.id })
     }
 
+    @Test fun itemsFoundSayTheirAisle() {
+        val items = listOf(item(1, 3, "Milk"), item(2, 3, "milk chocolate"), item(3, 3, "Milkweed"))
+        val found = Everywhere.collect("milk", emptyList(), emptyList(), items, lists, TaskSort.PRIORITY, today,
+            mapOf("milkweed" to io.github.baslawson.smartnotes.parse.Aisle.CARE))
+        val hits = Hits.of(found, Section.SHOPPING, emptySet()).filterIsInstance<Hit.ItemHit>().associate { it.item.name to it.aisle.label }
+        // By the word list, or the aisle chosen for it.
+        assertEquals(mapOf("Milk" to "Dairy & eggs", "milk chocolate" to "Snacks & sweets", "Milkweed" to "Health & beauty"), hits)
+    }
+
     @Test fun tasksOpenFirstThenDone() {
         val todos = listOf(
             Todo(1, "Call the bank", done = true, doneAt = 5),

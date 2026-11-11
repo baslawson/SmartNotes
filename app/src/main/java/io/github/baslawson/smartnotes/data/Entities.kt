@@ -70,6 +70,23 @@ data class ShoppingHistory(
     val lastUsed: Long,
 )
 
+/** The aisle chosen for an item ("Aisle…"), by its [key]; items without one go by the word list (parse/Aisles.kt). */
+@Entity(tableName = "item_aisles")
+data class ItemAisle(
+    @PrimaryKey val key: String,
+    /** An Aisle name. */
+    val aisle: String,
+)
+
+/** Something bought again and again: "Add staples" puts every staple on the list shown. */
+@Entity(tableName = "staples")
+data class Staple(
+    @PrimaryKey val key: String,
+    val name: String,
+    val quantity: String = "",
+    val addedAt: Long = 0,
+)
+
 /**
  * A to-do task. [dueDate] ISO date, [dueTime] ISO time (both optional). With [remind], it reminds at the due date and
  * time (09:00 without a time). [repeat] is a Repeat name; [repeatEvery] the N of "every N days". [priority]: 0 low,

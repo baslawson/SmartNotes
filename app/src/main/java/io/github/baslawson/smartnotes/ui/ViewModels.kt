@@ -36,6 +36,8 @@ import io.github.baslawson.smartnotes.parse.TaskDates
 import io.github.baslawson.smartnotes.data.Week
 import java.time.LocalDateTime
 import io.github.baslawson.smartnotes.parse.Shopping
+import io.github.baslawson.smartnotes.parse.Aisle
+import io.github.baslawson.smartnotes.data.Staple
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -652,6 +654,8 @@ data class ShoppingState(
     val lists: List<ShoppingList> = emptyList(),
     /** The items of the day shown (none when that day has no list yet). */
     val items: List<ShoppingItem> = emptyList(),
+    /** The list [items] are of (for a moment after switching days, still the last day's). */
+    val itemsOf: Long = -1,
     /** Anytime's items (shown under today's too). */
     val anytime: List<ShoppingItem> = emptyList(),
     val history: List<PastItem> = emptyList(),
@@ -715,7 +719,8 @@ class ShoppingViewModel(
     /** Each of [lists] gets the order its items showed in [old], so every list looks as it did a moment ago. */
     private suspend fun seed(lists: List<Long>, old: ItemSort) {
         if (old == ItemSort.MINE) return
-        lists.forEach { id -> repo.arrangeItemsFrom(id) { open -> Sorting.items(open, old) } }
+        val chosen = aisles.value
+        lists.forEach { id -> repo.arrangeItemsFrom(id) { open -> Sorting.items(open, old, chosen) } }
     }
 
     /** A drag ended (in any order): the open items of the list shown, in their new order, which becomes My order. */
@@ -771,10 +776,39 @@ class ShoppingViewModel(
     }
 
     val state: StateFlow<ShoppingState> = combine(
-        repo.observeLists(), listId.flatMapLatest { repo.observeItems(it) }, repo.observeItems(1L), repo.observeHistory(),
-    ) { lists, items, anytime, history ->
-        ShoppingState(lists, items, anytime, history.map(ShoppingHistory::toPast), loaded = true)
+        repo.observeLists(), listId.flatMapLatest { id -> repo.observeItems(id).map { id to it } }, repo.observeItems(1L), repo.observeHistory(),
+    ) { lists, (id, items), anytime, history ->
+        ShoppingState(lists, items, id, anytime, history.map(ShoppingHistory::toPast), loaded = true)
     }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SHARING, ShoppingState())
+
+    /** The aisles chosen for items ("Aisle…"), by item key; the others go by the word list. */
+    val aisles: StateFlow<Map<String, Aisle>> = repo.observeAisles().stateIn(viewModelScope, SHARING, emptyMap())
+
+    /** Things bought again and again ("Add staples"). */
+    val staples: StateFlow<List<Staple>> = repo.observeStaples().stateIn(viewModelScope, SHARING, emptyList())
+
+    /** Long-press → Aisle…: the selected items ([items]: those shown) go in [aisle] (null: by their name). */
+    fun setAisleSelected(items: List<ShoppingItem>, aisle: Aisle?) {
+        val keys = items.filter { it.id in selection.ids }.map { it.key }.toSet()
+        selection.clear()
+        if (keys.isNotEmpty()) appScope.launch { repo.setAisle(keys, aisle) }
+    }
+
+    /** Long-press → Staple: the selected items become staples, or stop being ones when they all are already. */
+    fun toggleStapleSelected(items: List<ShoppingItem>) {
+        val picked = items.filter { it.id in selection.ids }
+        selection.clear()
+        if (picked.isEmpty()) return
+        val keys = staples.value.map { it.key }.toSet()
+        val all = picked.all { it.key in keys }
+        appScope.launch { repo.setStaple(picked, staple = !all) }
+    }
+
+    /** "Add staples": every staple not already to buy goes on the day shown. */
+    fun addStaples() {
+        val date = day.value
+        appScope.launch { repo.addStaples(date) }
+    }
 
     /** List id → items still to buy (the strip's dots and Anytime's count). */
     val openCounts: StateFlow<Map<Long, Int>> = repo.observeOpenCounts().stateIn(viewModelScope, SHARING, emptyMap())

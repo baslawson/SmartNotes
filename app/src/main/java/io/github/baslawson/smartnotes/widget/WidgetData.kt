@@ -7,6 +7,7 @@ import io.github.baslawson.smartnotes.data.TaskSort
 import io.github.baslawson.smartnotes.data.Todo
 import io.github.baslawson.smartnotes.data.ItemSort
 import io.github.baslawson.smartnotes.data.carriesOver
+import io.github.baslawson.smartnotes.parse.Aisle
 import java.time.LocalDate
 import java.time.ZoneId
 
@@ -27,7 +28,8 @@ object WidgetData {
         lists.firstOrNull { it.deletedAt == null && it.date == today.toString() }
 
     /** Items still to buy on a list, in the order the Shopping screen shows them. */
-    fun toBuy(items: List<ShoppingItem>, sort: ItemSort): List<ShoppingItem> = Sorting.items(items.filter { !it.checked }, sort)
+    fun toBuy(items: List<ShoppingItem>, sort: ItemSort, aisles: Map<String, Aisle> = emptyMap()): List<ShoppingItem> =
+        Sorting.items(items.filter { !it.checked }, sort, aisles)
 
     /**
      * The lists whose open items belong on today's widget: today's, and the past days' that carry over to today (the
@@ -40,13 +42,17 @@ object WidgetData {
      * What's still to buy today: today's list in the screen's order, then what past days still have (carried over to
      * today when Shopping next opens; a name today's list has, ticked or not, isn't carried), A–Z, leaving out names today's list already has.
      */
-    fun toBuyToday(lists: List<ShoppingList>, items: List<ShoppingItem>, today: LocalDate, sort: ItemSort, zone: ZoneId = ZoneId.systemDefault()): List<ShoppingItem> {
+    fun toBuyToday(
+        lists: List<ShoppingList>, items: List<ShoppingItem>, today: LocalDate, sort: ItemSort,
+        zone: ZoneId = ZoneId.systemDefault(), aisles: Map<String, Aisle> = emptyMap(),
+    ): List<ShoppingItem> {
         val todayId = todayList(lists, today)?.id
         val pastIds = listsForToday(lists, today, zone).map { it.id }.toSet() - setOfNotNull(todayId)
-        val onToday = toBuy(items.filter { it.listId == todayId }, sort)
+        val onToday = toBuy(items.filter { it.listId == todayId }, sort, aisles)
         // Every name on today's list, ticked ones too: carrying over drops past items today already has.
         val keys = items.filter { it.listId == todayId }.map { it.key }.toMutableSet()
         val carried = items.filter { it.listId in pastIds && !it.checked }.sortedBy { it.name.lowercase() }.filter { keys.add(it.key) }
-        return onToday + carried
+        // By aisle: today's and the carried ones together, under the same aisles as Shopping will show them.
+        return if (sort == ItemSort.AISLE) Sorting.items(onToday + carried, sort, aisles) else onToday + carried
     }
 }

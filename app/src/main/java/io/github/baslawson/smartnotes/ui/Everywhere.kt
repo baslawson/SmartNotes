@@ -9,6 +9,7 @@ import io.github.baslawson.smartnotes.data.TaskSort
 import io.github.baslawson.smartnotes.data.Todo
 import io.github.baslawson.smartnotes.data.TodoRepository
 import io.github.baslawson.smartnotes.data.orderLists
+import io.github.baslawson.smartnotes.parse.Aisle
 import io.github.baslawson.smartnotes.parse.NoteParser
 import io.github.baslawson.smartnotes.parse.Search
 import kotlinx.coroutines.CoroutineScope
@@ -39,6 +40,8 @@ data class Found(
     val notes: List<NoteRow> = emptyList(),
     val tasks: List<Todo> = emptyList(),
     val items: List<Pair<ShoppingItem, ShoppingList>> = emptyList(),
+    /** The aisles chosen for items, by key (the others go by the word list). */
+    val aisles: Map<String, Aisle> = emptyMap(),
     /** False until the first results for [query] are in (so "Nothing found" doesn't flash up while searching). */
     val loaded: Boolean = false,
 ) {
@@ -75,8 +78,9 @@ class Everywhere(
             if (terms.isEmpty()) flowOf(Found(q, loaded = true))
             // Shopping: the items whose name holds the longest word (a quick narrowing in the database), then the rule.
             else combine(
-                notes.search(q), todos.observeAll(), shopping.search(terms.maxBy { it.length }), shopping.observeLists(), taskSort,
-            ) { n, t, i, lists, sort -> collect(q, n, t, i, lists, sort, today()) }
+                notes.search(q), todos.observeAll(), shopping.search(terms.maxBy { it.length }), shopping.observeLists(),
+                combine(taskSort, shopping.observeAisles()) { sort, aisles -> sort to aisles },
+            ) { n, t, i, lists, (sort, aisles) -> collect(q, n, t, i, lists, sort, today(), aisles) }
         }
         .flowOn(Dispatchers.Default)
 
@@ -93,6 +97,7 @@ class Everywhere(
             lists: List<ShoppingList>,
             sort: TaskSort,
             today: LocalDate,
+            aisles: Map<String, Aisle> = emptyMap(),
         ): Found {
             val terms = Search.terms(query, limit = Int.MAX_VALUE)
             if (terms.isEmpty()) return Found(query, loaded = true)
@@ -113,7 +118,7 @@ class Everywhere(
                 .mapNotNull { item -> byId[item.listId]?.let { item to it } }
                 .sortedWith(compareBy<Pair<ShoppingItem, ShoppingList>> { it.first.checked }.thenBy { order[it.second.id] ?: Int.MAX_VALUE }
                     .thenBy(String.CASE_INSENSITIVE_ORDER) { it.first.name })
-            return Found(query, terms, noteRows, searchTasks(todos, query, sort), found, loaded = true)
+            return Found(query, terms, noteRows, searchTasks(todos, query, sort), found, aisles, loaded = true)
         }
     }
 }

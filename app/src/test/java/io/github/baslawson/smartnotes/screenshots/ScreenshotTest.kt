@@ -7,6 +7,7 @@ import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -177,7 +178,8 @@ class ScreenshotTest {
         shot("light-12-search-from-shopping", "In Tasks (1)")
         compose.onNodeWithText("In Shopping (1)").assertExists()
         compose.onNodeWithText("In Notes (1)").assertExists()
-        compose.onNodeWithText("Shopping · Today").assertExists()
+        // Where it is: the list and the aisle.
+        compose.onNodeWithText("Shopping · Today · Fruit & veg").assertExists()
         // A note found here opens.
         compose.onNodeWithText("Recipes").performClick()
         compose.waitUntil(10_000) { compose.onAllNodesWithText("Lemon pasta", substring = true).fetchSemanticsNodes().isNotEmpty() }
@@ -189,6 +191,33 @@ class ScreenshotTest {
         shot("light-13-search-from-notes", "In Shopping (1)")
         compose.onNodeWithText("In Notes (1)").assertExists()
         compose.onNodeWithText("Buy a lemon squeezer").assertExists()
+    }
+
+    /** "By aisle" puts the items under their aisles; staples are starred and "Add staples" puts back the missing ones. */
+    @Test fun shoppingByAisleAndStaples() {
+        val app = app()
+        runBlocking {
+            val today = app.shopping.listForDate(LocalDate.now())
+            for (item in listOf("2x milk", "apples", "cheddar", "birthday card", "bananas")) app.shopping.add(today, item)
+            app.shopping.setAisle(listOf("cheddar"), io.github.baslawson.smartnotes.parse.Aisle.SNACKS)
+            val items = app.shopping.observeItems(today).first()
+            app.shopping.setStaple(items.filter { it.key in setOf("milk", "bananas") }, staple = true)
+            // A staple not on today's list.
+            app.shopping.addOn(LocalDate.now().plusDays(1), "coffee")
+            app.shopping.setStaple(app.shopping.observeItems(app.shopping.listForDate(LocalDate.now().plusDays(1))).first(), staple = true)
+            app.settings.setItemSort(io.github.baslawson.smartnotes.data.ItemSort.AISLE)
+        }
+        compose.onNodeWithText("Shopping").performClick()
+        compose.waitUntil(10_000) { compose.onAllNodesWithText("Got it").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("Got it").performClick()
+        // (No scrolling: Robolectric doesn't settle while this list scrolls; everything fits on screen.)
+        shot("light-14-shopping-by-aisle", "Fruit & veg (2)")
+        for (heading in listOf("Dairy & eggs (1)", "Snacks & sweets (1)", "Other (1)")) compose.onNodeWithText(heading).assertExists()
+        compose.onAllNodesWithContentDescription("Staple").assertCountEquals(2) // milk and bananas
+        compose.onNodeWithText("Add staples (1)").performClick()
+        compose.waitUntil(10_000) { compose.onAllNodesWithText("Breakfast (1)").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("coffee").assertExists()
+        compose.onNodeWithText("Add staples", substring = true).assertDoesNotExist()
     }
 
     @Test fun dark() {

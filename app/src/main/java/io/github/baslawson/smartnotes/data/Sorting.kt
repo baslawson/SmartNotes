@@ -1,5 +1,7 @@
 package io.github.baslawson.smartnotes.data
 
+import io.github.baslawson.smartnotes.parse.Aisle
+import io.github.baslawson.smartnotes.parse.Aisles
 import java.time.DayOfWeek
 import java.time.LocalDate
 
@@ -15,7 +17,7 @@ enum class TaskDay(val label: String) {
 }
 
 /** Shopping items' sort button (items to buy; ticked ones stay below, latest ticked first). */
-enum class ItemSort(val label: String) { ADDED("Added"), NAME("A–Z"), MINE("My order") }
+enum class ItemSort(val label: String) { ADDED("Added"), NAME("A–Z"), AISLE("By aisle"), MINE("My order") }
 
 /** Shopping lists' (the date chips') sort button. */
 enum class ListSort(val label: String) { DATE("By date"), MINE("My order") }
@@ -73,16 +75,23 @@ object Sorting {
         return TaskDay.entries.mapNotNull { day -> groups[day]?.let { day to it } }
     }
 
-    /** Items still to buy. */
-    fun items(items: List<ShoppingItem>, sort: ItemSort): List<ShoppingItem> {
+    /** Items still to buy; [aisles]: the aisles chosen for items (by key), for "By aisle". */
+    fun items(items: List<ShoppingItem>, sort: ItemSort, aisles: Map<String, Aisle> = emptyMap()): List<ShoppingItem> {
         val added = compareBy<ShoppingItem> { it.addedAt }.thenBy { it.id }
+        val name = compareBy<ShoppingItem, String>(text) { it.name }.then(added)
         val order = when (sort) {
             ItemSort.ADDED -> added
-            ItemSort.NAME -> compareBy<ShoppingItem, String>(text) { it.name }.then(added)
+            ItemSort.NAME -> name
+            // Aisle by aisle in the shop's order, A–Z within each.
+            ItemSort.AISLE -> compareBy<ShoppingItem> { Aisles.of(it.key, it.name, aisles).ordinal }.then(name)
             ItemSort.MINE -> compareBy<ShoppingItem> { it.position }.then(added)
         }
         return items.sortedWith(order)
     }
+
+    /** Items still to buy aisle by aisle ("By aisle"), A–Z within each; empty aisles left out. */
+    fun itemAisles(items: List<ShoppingItem>, aisles: Map<String, Aisle>): List<Pair<Aisle, List<ShoppingItem>>> =
+        items(items, ItemSort.AISLE, aisles).groupBy { Aisles.of(it.key, it.name, aisles) }.toList()
 
     /** [ids] with [moved] put where [target] is (a drag ended there); unchanged if either isn't in [ids]. */
     fun move(ids: List<Long>, moved: Long, target: Long): List<Long> {

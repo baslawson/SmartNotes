@@ -31,6 +31,21 @@ class BackupFormatTest {
         assertEquals("1 note, 2 tasks, 1 shopping list", back.summary())
     }
 
+    @Test fun aislesAndStaplesGoIntoTheBackup() {
+        val full = data.copy(aisles = listOf(ItemAisle("milk", "SNACKS")), staples = listOf(Staple("milk", "Milk", "2x", 5)))
+        assertEquals(full.copy(settings = emptyMap()), BackupFormat.read(BackupFormat.write(full)).copy(settings = emptyMap()))
+        // Empty ones are kept as empty (a restore clears them), not as "from before".
+        val none = data.copy(aisles = emptyList(), staples = emptyList())
+        assertEquals(emptyList<Staple>(), BackupFormat.read(BackupFormat.write(none)).staples)
+        // A file from before 0.8.0 has neither: null, so a restore keeps what the app has.
+        val old = BackupFormat.read(BackupFormat.write(data))
+        assertEquals(null, old.aisles)
+        assertEquals(null, old.staples)
+        // The same key twice is a damaged file.
+        val twice = data.copy(staples = listOf(Staple("milk", "Milk"), Staple("milk", "milk")))
+        assertThrows(BackupException::class.java) { BackupFormat.read(BackupFormat.write(twice)) }
+    }
+
     @Test fun olderBackupsWithoutPositionsReadAsZero() {
         val old = org.json.JSONObject(BackupFormat.write(data)).apply {
             for (part in listOf("notes", "todos", "shoppingLists", "shoppingItems")) {

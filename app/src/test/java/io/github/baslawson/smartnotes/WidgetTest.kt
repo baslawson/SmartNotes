@@ -137,6 +137,12 @@ class WidgetTest {
         db.close()
     }
 
+    @Test fun byAisleTakesInTheCarriedItemsToo() {
+        val lists = listOf(ShoppingList(2, "", date = "2026-11-10"), ShoppingList(3, "", date = "2026-11-12"))
+        val items = listOf(ShoppingItem(1, 3, "milk", "milk"), ShoppingItem(2, 2, "apples", "apples"), ShoppingItem(3, 3, "card", "card"))
+        assertEquals(listOf(2L, 1L, 3L), WidgetData.toBuyToday(lists, items, today, ItemSort.AISLE, java.time.ZoneOffset.UTC).map { it.id })
+    }
+
     @Test fun aWidgetTickOnlyCountsForTheDateItsRowShowed() = kotlinx.coroutines.runBlocking {
         val app = ApplicationProvider.getApplicationContext<SmartNotesApp>()
         val now = LocalDate.now()
