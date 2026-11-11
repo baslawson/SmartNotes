@@ -23,6 +23,13 @@ object Shopping {
         return ParsedItem(text, "")
     }
 
+    /** An item as it would be typed ("2x milk", "milk 2L"), so editing it and saving keeps the same name and quantity. */
+    fun editText(name: String, quantity: String): String {
+        if (quantity.isEmpty()) return name
+        val wanted = ParsedItem(name, quantity)
+        return listOf("$quantity $name", "$name $quantity").firstOrNull { parse(it) == wanted } ?: "$quantity $name"
+    }
+
     /** The key that makes "Milk" and "milk " the same item. */
     fun key(name: String): String = name.trim().lowercase()
 

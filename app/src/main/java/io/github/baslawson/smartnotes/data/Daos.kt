@@ -1,6 +1,7 @@
 package io.github.baslawson.smartnotes.data
 
 import androidx.room.Dao
+import io.github.baslawson.smartnotes.parse.Shopping
 import androidx.room.Insert
 import androidx.room.Query
 import androidx.room.Transaction
@@ -123,6 +124,28 @@ interface ShoppingDao {
 
     @Query("SELECT * FROM shopping_history WHERE `key` = :key")
     suspend fun history(key: String): ShoppingHistory?
+
+    @Query("SELECT * FROM shopping_items WHERE id = :id")
+    suspend fun item(id: Long): ShoppingItem?
+
+    /**
+     * Renames item [id] (only while its key is still [expectedKey]: a draft made before a restore can't rename another
+     * item) to [name]/[quantity], with its suggestions, in one go. False when another item on its list has that name.
+     */
+    @Transaction
+    suspend fun renameItem(id: Long, expectedKey: String, name: String, quantity: String, now: Long): Boolean {
+        val item = item(id)?.takeIf { it.key == expectedKey } ?: return true
+        val key = Shopping.key(name)
+        if (key != item.key && findByKey(item.listId, key) != null) return false
+        update(item.copy(name = name, key = key, quantity = quantity))
+        if (name == item.name) return true // only the quantity changed: suggestions stay as they are
+        val (old, new) = renamedHistory(item.key, history(item.key), history(key), key, name, now)
+        if (key != item.key) {
+            if (old == null) forget(item.key) else upsertHistory(old)
+        }
+        new?.let { upsertHistory(it) }
+        return true
+    }
 
     @Insert
     suspend fun insert(item: ShoppingItem): Long

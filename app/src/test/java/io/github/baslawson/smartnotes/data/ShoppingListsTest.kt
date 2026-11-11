@@ -47,4 +47,20 @@ class ShoppingListsTest {
         assertEquals("a\\_b", likeEscaped("a_b"))
         assertEquals("c\\\\d", likeEscaped("c\\d"))
     }
+
+    @Test fun renamingMovesOneUseToTheNewName() {
+        val typo = ShoppingHistory("mlik", "mlik", 1, 5)
+        // Used once (just this item): forgotten; the new name gets its first use.
+        assertEquals(null to ShoppingHistory("milk", "milk", 1, 9), renamedHistory("mlik", typo, null, "milk", "milk", 9))
+        // Used more: one use fewer; the new name's count goes up.
+        val oat = ShoppingHistory("oat milk", "Oat milk", 4, 2)
+        assertEquals(
+            typo.copy(useCount = 2) to oat.copy(name = "oat milk", useCount = 5, lastUsed = 9),
+            renamedHistory("mlik", typo.copy(useCount = 3), oat, "oat milk", "oat milk", 9),
+        )
+        // Only capitals changed: same entry, new spelling; nothing made up when there was none.
+        val milk = ShoppingHistory("milk", "milk", 3, 2)
+        assertEquals(milk to milk.copy(name = "Milk"), renamedHistory("milk", milk, milk, "milk", "Milk", 9))
+        assertEquals(null to null, renamedHistory("milk", null, null, "milk", "Milk", 9))
+    }
 }

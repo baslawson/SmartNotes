@@ -29,4 +29,13 @@ class ShoppingTest {
         assertEquals(listOf("Milkshake", "Mild cheese", "Oat milk"), Shopping.suggest("mil", history, setOf("milk")).map { it.name })
         assertEquals(emptyList<PastItem>(), Shopping.suggest(" ", history, emptySet()))
     }
+
+    @Test fun editTextGivesBackTheSameNameAndQuantity() {
+        val cases = listOf("milk" to "", "milk" to "2x", "Coke Zero" to "1.5 l", "milk" to "2L", "eggs" to "x12", "7up" to "", "apples" to "3")
+        for ((name, quantity) in cases) {
+            assertEquals(ParsedItem(name, quantity), Shopping.parse(Shopping.editText(name, quantity)))
+        }
+        assertEquals("2x milk", Shopping.editText("milk", "2x"))
+        assertEquals("milk", Shopping.editText("milk", ""))
+    }
 }

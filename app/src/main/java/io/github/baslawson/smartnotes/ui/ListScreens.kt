@@ -109,6 +109,9 @@ import io.github.baslawson.smartnotes.reminders.Repeat
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
+import io.github.baslawson.smartnotes.parse.Shopping
 import kotlinx.coroutines.delay
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import java.time.LocalTime
@@ -579,6 +582,11 @@ fun ShoppingScreen(vm: ShoppingViewModel, setting: ReminderSound, onBack: () -> 
     val editing = editingId?.let { id -> state.lists.firstOrNull { it.id == id } }
     // + New date: a date picker; that day's list is made (or opened, if there is one).
     var pickNew by rememberSaveable { mutableStateOf(false) }
+    // The item being renamed (kept through a rotation); closes if the item goes or another list is opened.
+    var renamingId by rememberSaveable { mutableStateOf<Long?>(null) }
+    val renaming = renamingId?.let { id -> state.items.firstOrNull { it.id == id } }
+    // Gone (deleted, or another list opened): closed for good, so Undo or coming back doesn't reopen it.
+    LaunchedEffect(state.loaded, renaming == null) { if (state.loaded && renamingId != null && renaming == null) renamingId = null }
     val list = state.lists.firstOrNull { it.id == listId }
     // Nothing shown yet (the first time), or the list shown has gone: today's list.
     LaunchedEffect(state.loaded, list) { if (state.loaded && listToShow(listId, state.lists) == null) vm.openToday() }
@@ -717,7 +725,7 @@ fun ShoppingScreen(vm: ShoppingViewModel, setting: ReminderSound, onBack: () -> 
                 items(order.ids.mapNotNull { byId[it] }, key = { it.id }) { item ->
                     ReorderableItem(reorder, key = item.id, enabled = canArrange) { dragging ->
                         Surface(shadowElevation = if (dragging) 6.dp else 0.dp) {
-                            ItemLine(item, onCheck = { vm.setChecked(item, it) }, onDelete = { vm.delete(item) }) {
+                            ItemLine(item, onCheck = { vm.setChecked(item, it) }, onDelete = { vm.delete(item) }, onEdit = { renamingId = item.id }) {
                                 if (canArrange) DragHandleIcon(item.name, Modifier.draggableHandle(onDragStarted = { order.start() }, onDragStopped = { order.stop()?.let(vm::arrangeItems) }).padding(12.dp))
                             }
                         }
@@ -729,7 +737,7 @@ fun ShoppingScreen(vm: ShoppingViewModel, setting: ReminderSound, onBack: () -> 
                         CompletedHeader("In the basket (${checked.size})", showTicked, vm::toggleShowTicked)
                     }
                     if (showTicked) items(checked, key = { it.id }) { item ->
-                        ItemLine(item, onCheck = { vm.setChecked(item, it) }, onDelete = { vm.delete(item) })
+                        ItemLine(item, onCheck = { vm.setChecked(item, it) }, onDelete = { vm.delete(item) }, onEdit = { renamingId = item.id })
                     }
                 }
             }
@@ -747,6 +755,18 @@ fun ShoppingScreen(vm: ShoppingViewModel, setting: ReminderSound, onBack: () -> 
     if (arrangeLists) ArrangeListsDialog(
         Sorting.lists(currentLists, listSort, today), listSort == ListSort.MINE, { it.label(style) }, vm::arrangeLists,
     ) { arrangeLists = false }
+    renaming?.let { item ->
+        EditItemDialog(item, others = state.items.filter { it.id != item.id }.map { it.key }.toSet(),
+            onSave = { vm.rename(item, it) }) { renamingId = null }
+    }
+    if (vm.nameTaken) {
+        AlertDialog(
+            onDismissRequest = { vm.nameTaken = false },
+            title = { Text("Not renamed") },
+            text = { Text("That's already on this list.") },
+            confirmButton = { TextButton(onClick = { vm.nameTaken = false }) { Text("OK") } },
+        )
+    }
     if (pickNew) DatePickDialog(null, onPick = { vm.openDate(it) }, onDismiss = { pickNew = false })
     if (vm.dateTaken) {
         AlertDialog(
@@ -823,13 +843,19 @@ private fun ShoppingListDialog(
 }
 
 @Composable
-private fun ItemLine(item: ShoppingItem, onCheck: (Boolean) -> Unit, onDelete: () -> Unit, handle: @Composable () -> Unit = {}) {
-    // Only the box ticks: a tap on the name does nothing (no ticking by accident while scrolling or dragging).
+private fun ItemLine(
+    item: ShoppingItem,
+    onCheck: (Boolean) -> Unit,
+    onDelete: () -> Unit,
+    onEdit: () -> Unit,
+    handle: @Composable () -> Unit = {},
+) {
+    // Only the box ticks; a tap on the name opens it to rename (no ticking by accident while scrolling or dragging).
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Checkbox(checked = item.checked, onCheckedChange = onCheck)
         Text(
             item.name,
-            modifier = Modifier.weight(1f),
+            modifier = Modifier.weight(1f).clickable(onClickLabel = "Rename", onClick = onEdit).padding(vertical = 12.dp),
             textDecoration = if (item.checked) TextDecoration.LineThrough else null,
             color = if (item.checked) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
         )
@@ -839,6 +865,39 @@ private fun ItemLine(item: ShoppingItem, onCheck: (Boolean) -> Unit, onDelete: (
         IconButton(onClick = onDelete) { Icon(Icons.Default.Clear, contentDescription = "Remove ${item.name}") }
         handle()
     }
+}
+
+/** Rename an item: its name and quantity as typed ("2x oat milk"); [others] are the keys of the list's other items. */
+@Composable
+private fun EditItemDialog(item: ShoppingItem, others: Set<String>, onSave: (String) -> Unit, onDismiss: () -> Unit) {
+    val start = Shopping.editText(item.name, item.quantity)
+    // Started afresh if the item changes underneath (say a backup restored meanwhile).
+    var text by rememberSaveable(item.id, item.key, stateSaver = TextFieldValue.Saver) {
+        mutableStateOf(TextFieldValue(start, selection = TextRange(0, start.length)))
+    }
+    val parsed = Shopping.parse(text.text)
+    val taken = parsed != null && Shopping.key(parsed.name) in others
+    val focus = remember { FocusRequester() }
+    val save = { if (parsed != null && !taken) { onSave(text.text); onDismiss() } }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Rename item") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = text, onValueChange = { text = it },
+                    modifier = Modifier.fillMaxWidth().focusRequester(focus),
+                    singleLine = true, isError = taken,
+                    supportingText = { Text(if (taken) "That's already on this list." else "A quantity can go with it, e.g. 2x milk.") },
+                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { save() }),
+                )
+            }
+            LaunchedEffect(Unit) { focus.requestFocus() }
+        },
+        confirmButton = { TextButton(onClick = save, enabled = parsed != null && !taken) { Text("Save") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }
 
 /** Shopping → sort → Arrange lists…: the lists in "My order", dragged by their handles; each drop is saved. */

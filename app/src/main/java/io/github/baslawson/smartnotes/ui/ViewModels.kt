@@ -726,6 +726,14 @@ class ShoppingViewModel(
     }
 
     fun setChecked(item: ShoppingItem, checked: Boolean) = appScope.launch { repo.setChecked(item, checked) }
+
+    /** Saves an item's new name and quantity ("2x oat milk"). */
+    fun rename(item: ShoppingItem, text: String) = appScope.launch {
+        if (!repo.rename(item, text)) withContext(Dispatchers.Main) { nameTaken = true }
+    }
+
+    /** A rename refused because the list already has an item with that name (added meanwhile, say). */
+    var nameTaken by mutableStateOf(false)
     /** ✕: gone at once, with Undo for a moment. */
     fun delete(item: ShoppingItem) = appScope.launch {
         repo.delete(item.id)

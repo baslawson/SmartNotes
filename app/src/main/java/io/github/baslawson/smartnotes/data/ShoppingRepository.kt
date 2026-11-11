@@ -60,6 +60,18 @@ class ShoppingRepository(
         dao.upsertHistory(ShoppingHistory(key, parsed.name, (past?.useCount ?: 0) + 1, now))
     }
 
+    /**
+     * Renames [item] to what [input] says ("2x oat milk": name and quantity; no quantity clears it). Returns false,
+     * changing nothing, when another item on its list already has that name. Suggestions follow: the new name is
+     * suggested, and the old one loses this use (gone when nothing else used it).
+     */
+    suspend fun rename(item: ShoppingItem, input: String): Boolean = lock.withLock {
+        val parsed = Shopping.parse(input) ?: return@withLock true
+        val done = dao.renameItem(item.id, item.key, parsed.name, parsed.quantity, clock.millis())
+        if (done) AppLog.i("Shopping", "Renamed an item on list ${item.listId}")
+        done
+    }
+
     suspend fun setChecked(item: ShoppingItem, checked: Boolean) = lock.withLock {
         dao.setChecked(item.id, checked, if (checked) clock.millis() else 0)
     }
@@ -197,6 +209,24 @@ fun orderLists(lists: List<ShoppingList>, today: LocalDate): List<ShoppingList> 
     val coming = dated.filter { it.second?.isBefore(today) == false }.sortedWith(compareBy({ it.second }, { it.first.id })).map { it.first }
     val past = dated.filter { it.second?.isBefore(today) == true }.sortedWith(compareByDescending<Pair<ShoppingList, LocalDate?>> { it.second }.thenBy { it.first.id }).map { it.first }
     return undated + coming + past
+}
+
+/**
+ * Suggestions after renaming an item from [oldKey] (its history [old]) to [newKey] ([newName], its history [new]):
+ * the old name with one use fewer (null: forget it) and the new name's entry (null: nothing to change). Only the
+ * spelling changing ("milk" → "Milk") just updates that entry's name.
+ */
+fun renamedHistory(
+    oldKey: String,
+    old: ShoppingHistory?,
+    new: ShoppingHistory?,
+    newKey: String,
+    newName: String,
+    now: Long,
+): Pair<ShoppingHistory?, ShoppingHistory?> {
+    if (oldKey == newKey) return old to old?.copy(name = newName)
+    val oldAfter = old?.takeIf { it.useCount > 1 }?.let { it.copy(useCount = it.useCount - 1) }
+    return oldAfter to ShoppingHistory(newKey, newName, (new?.useCount ?: 0) + 1, now)
 }
 
 /** [text] for a LIKE pattern: its own % and _ (and the escape \) match only themselves. */

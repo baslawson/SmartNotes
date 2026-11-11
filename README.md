@@ -29,7 +29,7 @@ Feb 28 → Mar 31). Ticking a repeating task moves its reminder to the next time
 Lists are dates: *+ New date* asks for a day and opens that day's list (one per day). *Anytime* is the undated list
 and can't be deleted. A dated list's ✎ changes its date or sets a reminder on that day (with its sound), or deletes it.
 Dates show as Today / Tomorrow or in Settings → Date format; the top bar shows the open list's day and full
-date. Type `2x milk`, `milk 2L` or `eggs x12`: the quantity shows apart from the name. Past items are suggested while
+date. Type `2x milk`, `milk 2L` or `eggs x12`: the quantity shows apart from the name. Tap an item's name to rename it or change its quantity (suggestions follow the new name); a name already on that list isn't taken twice. Past items are suggested while
 typing (✕ forgets one), and an item already on the list isn't added twice. The reminder lists what is still to buy.
 Shopping opens on the list you looked at last; the first time, or if that list is gone, on today's (made if needed).
 The chips run Anytime, Today, then the days to come, and the row scrolls to the list shown. Lists whose day has gone
