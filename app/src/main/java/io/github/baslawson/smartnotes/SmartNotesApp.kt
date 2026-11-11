@@ -4,9 +4,11 @@ import android.app.Application
 import androidx.core.content.pm.PackageInfoCompat
 import io.github.baslawson.smartnotes.data.NoteDatabase
 import io.github.baslawson.smartnotes.data.NoteRepository
+import io.github.baslawson.smartnotes.data.RecycleBin
 import io.github.baslawson.smartnotes.data.ShoppingRepository
+import io.github.baslawson.smartnotes.data.TodoRepository
+import io.github.baslawson.smartnotes.reminders.AlarmScheduler
 import io.github.baslawson.smartnotes.reminders.Notifications
-import io.github.baslawson.smartnotes.reminders.WorkReminderScheduler
 import io.github.baslawson.smartnotes.data.ReleaseApi
 import io.github.baslawson.smartnotes.data.Updates
 import kotlinx.coroutines.CoroutineExceptionHandler
@@ -25,8 +27,13 @@ class SmartNotesApp : Application() {
     )
 
     private val database by lazy { NoteDatabase.create(this) }
-    val notes by lazy { NoteRepository(database.notes(), WorkReminderScheduler(this)) }
-    val shopping by lazy { ShoppingRepository(database.shopping()) }
+    /** Every reminder (shopping lists, tasks) as an exact alarm. */
+    val alarms by lazy { AlarmScheduler(this, database, settings) }
+    val notes by lazy { NoteRepository(database.notes()) }
+    val shopping by lazy { ShoppingRepository(database.shopping(), alarms) }
+    val todos by lazy { TodoRepository(database.todos(), alarms) }
+    /** Deleted notes, tasks and shopping lists, kept for Settings → Recycle bin's time. */
+    val bin by lazy { RecycleBin(notes, todos, shopping, settings) }
 
     val settings by lazy { AppSettings(getSharedPreferences("settings", MODE_PRIVATE)) }
 
@@ -55,16 +62,27 @@ class SmartNotesApp : Application() {
             "App", "Started $packageName $versionName ($versionCode), Android ${android.os.Build.VERSION.RELEASE} " +
                 "(API ${android.os.Build.VERSION.SDK_INT}), ${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}"
         )
-        Notifications.createChannel(this)
-        // Once per installed version, schedule every reminder again, in case jobs were lost.
+        Notifications.createChannels(this)
+        // Every start sets the alarms again: a force-stop clears them without telling the app. Only alarms still to go
+        // off are in the ledger, so this is cheap, and setting one again just replaces it.
         val prefs = getSharedPreferences("app", MODE_PRIVATE)
         val version = PackageInfoCompat.getLongVersionCode(packageManager.getPackageInfo(packageName, 0))
-        if (prefs.getLong("scheduledFor", -1) != version) {
-            appScope.launch {
-                notes.rescheduleAll()
-                AppLog.i("Reminders", "Rescheduled all reminders for version $version")
+        appScope.launch {
+            if (prefs.getLong("scheduledFor", -1) != version) {
+                // Version 0.1.0 scheduled note reminders with WorkManager: those jobs go, exact alarms replace them.
+                runCatching { androidx.work.WorkManager.getInstance(this@SmartNotesApp).cancelAllWork() }
                 prefs.edit().putLong("scheduledFor", version).apply()
             }
+            // The first start since the phone restarted applies the restart rules (missed, not rung late), whether it
+            // comes before or after BOOT_COMPLETED (which can come long after, at the first unlock).
+            val bootCount = android.provider.Settings.Global.getInt(contentResolver, android.provider.Settings.Global.BOOT_COUNT, -1)
+            val saved = prefs.getInt("restoredBoot", -1)
+            val soonAfterBoot = android.os.SystemClock.elapsedRealtime() < 10 * 60_000L
+            // Nothing saved yet (the first start of this version): only counts as a restart soon after one.
+            val firstSinceBoot = if (bootCount >= 0) saved != bootCount && (saved >= 0 || soonAfterBoot) else soonAfterBoot
+            alarms.restoreAll(boot = firstSinceBoot)
+            if (bootCount >= 0) prefs.edit().putInt("restoredBoot", bootCount).apply()
+            bin.purge()
         }
     }
 }

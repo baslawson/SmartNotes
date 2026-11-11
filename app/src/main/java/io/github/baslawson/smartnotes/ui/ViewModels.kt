@@ -10,15 +10,19 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.baslawson.smartnotes.data.Note
+import io.github.baslawson.smartnotes.data.BinKind
 import io.github.baslawson.smartnotes.data.NoteRepository
+import io.github.baslawson.smartnotes.data.RecycleBin
 import io.github.baslawson.smartnotes.data.ShoppingHistory
 import io.github.baslawson.smartnotes.data.ShoppingItem
+import io.github.baslawson.smartnotes.data.ShoppingList
 import io.github.baslawson.smartnotes.data.ShoppingRepository
+import io.github.baslawson.smartnotes.data.Todo
+import io.github.baslawson.smartnotes.data.mergeTodo
+import io.github.baslawson.smartnotes.data.TodoRepository
 import io.github.baslawson.smartnotes.parse.NoteParser
-import io.github.baslawson.smartnotes.parse.NoteTask
 import io.github.baslawson.smartnotes.parse.PastItem
 import io.github.baslawson.smartnotes.parse.Related
-import io.github.baslawson.smartnotes.parse.Reminder
 import io.github.baslawson.smartnotes.parse.Search
 import io.github.baslawson.smartnotes.parse.Shopping
 import kotlinx.coroutines.CoroutineScope
@@ -34,17 +38,30 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import java.time.LocalDateTime
+import kotlinx.coroutines.withTimeoutOrNull
 
 private val SHARING = SharingStarted.WhileSubscribed(5_000)
 
 // ---------- Notes list ----------
+
+/** Long-press selection on a list screen: the ids picked; empty when not selecting. */
+class Selection {
+    var ids by mutableStateOf(emptySet<Long>())
+        private set
+    val active: Boolean get() = ids.isNotEmpty()
+    fun toggle(id: Long) { ids = if (id in ids) ids - id else ids + id }
+    fun selectAll(all: Collection<Long>) { ids = all.toSet() }
+    fun clear() { ids = emptySet() }
+    /** Drops ids no longer shown (deleted elsewhere, say). */
+    fun keepOnly(shown: Collection<Long>) { if (ids.any { it !in shown }) ids = ids.intersect(shown.toSet()) }
+}
 
 data class NoteRow(
     val note: Note,
@@ -52,7 +69,6 @@ data class NoteRow(
     val snippet: String,
     val tags: Set<String>,
     val openTasks: Int,
-    val nextReminder: LocalDateTime?,
 )
 
 data class NotesState(
@@ -64,7 +80,16 @@ data class NotesState(
 )
 
 @OptIn(FlowPreview::class, ExperimentalCoroutinesApi::class)
-class NotesViewModel(repo: NoteRepository) : ViewModel() {
+class NotesViewModel(repo: NoteRepository, private val bin: RecycleBin, private val appScope: CoroutineScope) : ViewModel() {
+    val selection = Selection()
+
+    /** Moves the selected notes to the recycle bin. */
+    fun deleteSelected() {
+        val ids = selection.ids.toList()
+        selection.clear()
+        appScope.launch { bin.trash(BinKind.NOTE, ids) }
+    }
+
     val query = MutableStateFlow("")
     val tag = MutableStateFlow<String?>(null)
 
@@ -73,7 +98,6 @@ class NotesViewModel(repo: NoteRepository) : ViewModel() {
         repo.observeAll(),
         tag,
     ) { (q, results), all, selected ->
-        val now = LocalDateTime.now()
         val terms = Search.terms(q)
         val tagsOf = all.associate { it.id to NoteParser.tags(it.title + "\n" + it.body) }
         val counts = tagsOf.values.flatten().groupingBy { it }.eachCount()
@@ -89,7 +113,6 @@ class NotesViewModel(repo: NoteRepository) : ViewModel() {
                     snippet = Search.snippet(note.body, terms),
                     tags = tagsOf[note.id].orEmpty(),
                     openTasks = NoteParser.tasks(note.body).count { !it.done },
-                    nextReminder = NoteParser.reminders(note.body).filter { !it.done && it.at.isAfter(now) }.minOfOrNull { it.at },
                 )
             }
         NotesState(rows, counts, terms, loaded = true)
@@ -106,12 +129,13 @@ data class EditorInfo(
     val links: List<LinkInfo> = emptyList(),
     val backlinks: List<Note> = emptyList(),
     val related: List<Note> = emptyList(),
-    val reminders: List<Reminder> = emptyList(),
+    /** The note's own `- [ ]` checkboxes, to tick here. */
+    val checklist: List<io.github.baslawson.smartnotes.parse.NoteTask> = emptyList(),
 )
 
 /**
- * Edits one note. Typing is saved as a draft after a short pause; leaving the screen (or the app) saves it for real,
- * which turns `@tomorrow` into a date and schedules the reminders. Saves run in the app's scope so they finish
+ * Edits one note. Typing is saved as a draft after a short pause; leaving the screen (or the app) saves it for real
+ * (an emptied note is then removed). Saves run in the app's scope so they finish
  * even after this screen is gone.
  *
  * Only edits made here are saved ([dirty]): an editor that hasn't loaded its note, or that wasn't typed in, never
@@ -120,6 +144,7 @@ data class EditorInfo(
 @OptIn(FlowPreview::class)
 class EditorViewModel(
     private val repo: NoteRepository,
+    private val bin: RecycleBin,
     private val appScope: CoroutineScope,
     startId: Long,
     startTitle: String,
@@ -171,7 +196,7 @@ class EditorViewModel(
                 Related.Candidate(n, NoteParser.tags(n.title + "\n" + n.body), Related.words(n.title + " " + n.body))
             },
         )
-        EditorInfo(tags, links, backlinks, related, NoteParser.reminders(b).sortedBy { it.at })
+        EditorInfo(tags, links, backlinks, related, NoteParser.tasks(b))
     }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SHARING, EditorInfo())
 
     fun onTitleChange(value: TextFieldValue) {
@@ -194,6 +219,15 @@ class EditorViewModel(
             delay(800)
             appScope.launch { persist(final = false) }
         }
+    }
+
+    /** Ticks or unticks the checkbox line [line] in the text being edited (notes keep their own checkboxes). */
+    fun toggleCheckbox(line: Int, expectedText: String) {
+        if (!loaded) return
+        // The list shown may be a moment behind the typing: only the same task on the same line is ticked.
+        if (NoteParser.tasks(body.text).none { it.line == line && it.text == expectedText }) return
+        val text = NoteParser.toggleTask(body.text, line) ?: return
+        onBodyChange(body.copy(text = text))
     }
 
     /**
@@ -253,11 +287,24 @@ class EditorViewModel(
         }
     }
 
+    /** To the recycle bin, with what was typed last (an unsaved new note has nothing to bin). */
     fun delete() {
+        val unsaved = loaded && dirty
         deleted = true
         draftJob?.cancel()
         gone = true
-        appScope.launch { saveLock.withLock { if (id != 0L) repo.delete(id) } }
+        appScope.launch {
+            saveLock.withLock {
+                val (noteId, t, b) = withContext(Dispatchers.Main) { Triple(id, title.text, body.text) }
+                // A new note not saved yet is saved first, so what was typed goes to the bin (and can come back).
+                val binId = when {
+                    noteId == 0L && (t.isNotBlank() || b.isNotBlank()) -> repo.saveDraft(0, t, b)
+                    unsaved && noteId != 0L -> noteId.also { repo.saveDraft(it, t, b) }
+                    else -> noteId
+                }
+                if (binId != 0L) bin.trash(BinKind.NOTE, listOf(binId))
+            }
+        }
     }
 
     private suspend fun persist(final: Boolean) = saveLock.withLock {
@@ -282,7 +329,7 @@ class EditorViewModel(
             id = saved?.id ?: 0L
             if (revision == rev) {
                 dirty = false
-                // Show "@tomorrow" as the date it became.
+                // Line ends as stored ("\r\n" becomes "\n").
                 if (saved != null && saved.body != b) body = body.replacedBy(saved.body)
             }
         }
@@ -294,52 +341,169 @@ class EditorViewModel(
         TextFieldValue(text, TextRange(selection.start.coerceAtMost(text.length), selection.end.coerceAtMost(text.length)))
 }
 
-// ---------- Tasks ----------
+// ---------- To-do ----------
 
-data class TaskRow(val noteId: Long, val noteTitle: String, val task: NoteTask)
+/** Remembers which list a screen showed last (per phone), so it opens there again. */
+private fun rememberedList(prefs: android.content.SharedPreferences?, key: String): Long = prefs?.getLong(key, 1L) ?: 1L
 
-class TasksViewModel(private val repo: NoteRepository, private val appScope: CoroutineScope) : ViewModel() {
-    val tasks: StateFlow<List<TaskRow>?> = repo.observeAll().map { notes ->
-        notes.flatMap { n ->
-            val title = NoteParser.displayTitle(n.title, n.body)
-            NoteParser.tasks(n.body).map { TaskRow(n.id, title, it) }
-        }
-    }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SHARING, null)
+data class TodoState(val todos: List<Todo> = emptyList(), val loaded: Boolean = false)
 
-    fun toggle(row: TaskRow) {
-        appScope.launch { repo.toggleTask(row.noteId, row.task.line) }
+/** Tasks: one anytime checklist; any task can have its own reminder. */
+class TodoViewModel(private val repo: TodoRepository, private val bin: RecycleBin, private val appScope: CoroutineScope) : ViewModel() {
+    val selection = Selection()
+
+    fun deleteSelected() {
+        val ids = selection.ids.toList()
+        selection.clear()
+        appScope.launch { bin.trash(BinKind.TASK, ids) }
     }
+
+    var input by mutableStateOf("")
+
+    val state: StateFlow<TodoState> = repo.observeAll().map { TodoState(it, loaded = true) }
+        .stateIn(viewModelScope, SHARING, TodoState())
+
+    fun add() {
+        val title = input.trim()
+        if (title.isEmpty()) return
+        input = ""
+        appScope.launch { repo.add(title) }
+    }
+
+    fun setDone(todo: Todo, done: Boolean) = appScope.launch { repo.setDone(todo.id, done) }
+    /** Moves the ticked tasks to the recycle bin. */
+    fun clearDone() = appScope.launch { bin.trash(BinKind.TASK, repo.doneIds()) }
+}
+
+/** Edits one to-do task; every change is saved straight away (text after a short pause). */
+@OptIn(FlowPreview::class)
+class TodoEditorViewModel(
+    private val repo: TodoRepository,
+    private val bin: RecycleBin,
+    private val appScope: CoroutineScope,
+    id: Long,
+) : ViewModel() {
+    var todo by mutableStateOf<Todo?>(null)
+        private set
+    var gone by mutableStateOf(false)
+        private set
+    private var saveJob: Job? = null
+    /** The row as this editor last saw it in the database: only fields changed from it are saved over the current row. */
+    private var base: Todo? = null
+    /** A change not yet saved. */
+    private var pending = false
+    /** Saves (and Done) run one at a time, in the order made. */
+    private val saveLock = Mutex()
+
+    init {
+        viewModelScope.launch {
+            val loaded = repo.get(id)
+            if (loaded == null) gone = true else { base = loaded; todo = loaded }
+        }
+    }
+
+    /** Applies [change]; text edits are saved after a pause, everything else at once. */
+    fun update(text: Boolean = false, change: (Todo) -> Todo) {
+        val current = todo ?: return
+        todo = change(current)
+        pending = true
+        saveJob?.cancel()
+        saveJob = viewModelScope.launch {
+            if (text) delay(600)
+            save()
+        }
+    }
+
+    /** Saves the editor's changes (read when the save's turn comes, so the latest win), then [after] if given. */
+    private fun save(after: (suspend (Long) -> Unit)? = null) {
+        pending = false
+        appScope.launch {
+            saveLock.withLock {
+                val edited = withContext(Dispatchers.Main) { todo } ?: return@withLock
+                val known = base ?: return@withLock
+                var saved = repo.save(known, edited) ?: return@withLock
+                if (after != null) {
+                    after(edited.id)
+                    saved = repo.get(edited.id) ?: return@withLock
+                }
+                withContext(Dispatchers.Main) {
+                    base = saved
+                    // Fields typed since this save started stay; the rest show the row as saved (and changed elsewhere).
+                    // The title box keeps what is typed: the saved title is trimmed, and a blank one keeps the old.
+                    todo = todo?.let { typed ->
+                        val shown = mergeTodo(edited, typed, saved)
+                        if (typed.title.isBlank() || typed.title.trim() == saved.title) shown.copy(title = typed.title) else shown
+                    }
+                }
+            }
+        }
+    }
+
+    fun setDone(done: Boolean) {
+        if (todo == null) return
+        saveJob?.cancel()
+        // The box shows the outcome once saved: a repeating task moves on to its next date rather than being done.
+        save { id -> repo.setDone(id, done) }
+    }
+
+    /** To the recycle bin, with the last changes saved first (also those a queued save hasn't written yet). */
+    fun delete() {
+        val t = todo ?: return
+        // The editor's last copy with the row it was based on: only what was changed between them is saved.
+        val known = base
+        saveJob?.cancel()
+        pending = false
+        todo = null
+        gone = true
+        appScope.launch {
+            saveLock.withLock {
+                if (known != null && t != known) repo.save(known, t)
+                bin.trash(BinKind.TASK, listOf(t.id))
+            }
+        }
+    }
+
+    /** Leaving the screen saves what is pending. */
+    fun finish() {
+        if (pending) {
+            saveJob?.cancel()
+            save()
+        }
+    }
+
+    override fun onCleared() = finish()
 }
 
 // ---------- Shopping ----------
 
 data class ShoppingState(
+    val lists: List<ShoppingList> = emptyList(),
     val items: List<ShoppingItem> = emptyList(),
-    /** Open tasks from notes tagged #shopping (or with #shopping on the task line). */
-    val fromNotes: List<TaskRow> = emptyList(),
     val history: List<PastItem> = emptyList(),
     val loaded: Boolean = false,
 )
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class ShoppingViewModel(
     private val repo: ShoppingRepository,
-    private val notes: NoteRepository,
+    private val bin: RecycleBin,
     private val appScope: CoroutineScope,
+    private val prefs: android.content.SharedPreferences?,
+    startList: Long,
 ) : ViewModel() {
+    val listId = MutableStateFlow(if (startList > 0) startList else rememberedList(prefs, KEY))
     var input by mutableStateOf("")
 
     val state: StateFlow<ShoppingState> = combine(
-        repo.observeItems(), repo.observeHistory(), notes.observeAll(),
-    ) { items, history, all ->
-        val fromNotes = all.flatMap { n ->
-            val noteTagged = SHOPPING_TAG in NoteParser.tags(n.title + "\n" + n.body)
-            val title = NoteParser.displayTitle(n.title, n.body)
-            NoteParser.tasks(n.body)
-                .filter { !it.done && (noteTagged || SHOPPING_TAG in it.tags) }
-                .map { TaskRow(n.id, title, it) }
-        }
-        ShoppingState(items, fromNotes, history.map(ShoppingHistory::toPast), loaded = true)
+        repo.observeLists(), listId.flatMapLatest { repo.observeItems(it) }, repo.observeHistory(),
+    ) { lists, items, history ->
+        ShoppingState(lists, items, history.map(ShoppingHistory::toPast), loaded = true)
     }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SHARING, ShoppingState())
+
+    fun select(id: Long) {
+        listId.value = id
+        prefs?.edit()?.putLong(KEY, id)?.apply()
+    }
 
     fun suggestions(state: ShoppingState): List<PastItem> =
         Shopping.suggest(input, state.history, state.items.filter { !it.checked }.map { it.key }.toSet())
@@ -347,7 +511,8 @@ class ShoppingViewModel(
     fun add(text: String = input) {
         if (text.isBlank()) return
         input = ""
-        appScope.launch { repo.add(text) }
+        val list = listId.value
+        appScope.launch { repo.add(list, text) }
     }
 
     /** Puts the suggestion on the list, keeping a quantity already typed ("2x mi" + "milk" → 2x milk). */
@@ -357,13 +522,49 @@ class ShoppingViewModel(
     }
 
     fun setChecked(item: ShoppingItem, checked: Boolean) = appScope.launch { repo.setChecked(item, checked) }
-    fun delete(item: ShoppingItem) = appScope.launch { repo.delete(item.id) }
-    fun clearChecked() = appScope.launch { repo.clearChecked() }
+    /** ✕: gone at once, with Undo for a moment. */
+    fun delete(item: ShoppingItem) = appScope.launch {
+        repo.delete(item.id)
+        bin.itemRemoved(item)
+    }
+    fun clearChecked() = listId.value.let { list -> appScope.launch { repo.clearChecked(list) } }
     fun forget(item: PastItem) = appScope.launch { repo.forget(Shopping.key(item.name)) }
-    fun tickNoteTask(row: TaskRow) = appScope.launch { notes.toggleTask(row.noteId, row.task.line) }
 
-    companion object {
-        const val SHOPPING_TAG = "shopping"
+    /** Saves a list's date and reminder. */
+    fun saveList(list: ShoppingList) = appScope.launch {
+        if (repo.saveList(list) == null) withContext(Dispatchers.Main) { dateTaken = true }
+    }
+
+    /** A save refused because another list has that date (made meanwhile, say in another window). */
+    var dateTaken by mutableStateOf(false)
+
+    /** Shows the list for [date], making it first if needed. */
+    fun openDate(date: java.time.LocalDate) = appScope.launch {
+        val id = repo.listForDate(date)
+        // Shown once the screen's lists include it: selecting it sooner could flip back to the first list.
+        // (Not forever: the screen may be gone, or the list binned meanwhile.)
+        withTimeoutOrNull(5_000) { state.first { s -> s.lists.any { it.id == id } } } ?: return@launch
+        withContext(Dispatchers.Main) { select(id) }
+    }
+
+    /** Lists selected with a long press (Anytime can't be). */
+    val selection = Selection()
+
+    fun deleteList(id: Long) = deleteLists(listOf(id))
+
+    fun deleteSelected() {
+        val ids = selection.ids.toList()
+        selection.clear()
+        deleteLists(ids)
+    }
+
+    private fun deleteLists(ids: List<Long>) {
+        if (listId.value in ids) select(1L)
+        appScope.launch { bin.trash(BinKind.LIST, ids) }
+    }
+
+    private companion object {
+        const val KEY = "shopping_list"
     }
 }
 

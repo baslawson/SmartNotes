@@ -45,6 +45,9 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -66,11 +69,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.baslawson.smartnotes.data.Note
 import io.github.baslawson.smartnotes.parse.NoteParser
 import io.github.baslawson.smartnotes.parse.Search
-import java.time.LocalDateTime
-import java.time.format.DateTimeFormatter
 
-private val WHEN = DateTimeFormatter.ofPattern("EEE d MMM HH:mm")
-fun formatWhen(at: LocalDateTime): String = WHEN.format(at)
 
 /** [text] with the words matching [terms] in bold on a highlight colour. */
 @Composable
@@ -91,24 +90,44 @@ fun NotesScreen(
     onOpen: (Long) -> Unit,
     onNew: () -> Unit,
     onSettings: () -> Unit,
+    onBin: () -> Unit,
     bottomBar: @Composable () -> Unit,
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
+    var menu by remember { mutableStateOf(false) }
+    val selection = vm.selection
+    LaunchedEffect(state.rows) { if (state.loaded) selection.keepOnly(state.rows.map { it.note.id }) }
     val query by vm.query.collectAsStateWithLifecycle()
     val selectedTag by vm.tag.collectAsStateWithLifecycle()
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("Notes") },
-                actions = {
-                    IconButton(onClick = onSettings) { Icon(Icons.Default.Settings, contentDescription = "Settings") }
-                },
-            )
+            if (selection.active) {
+                SelectionBar(selection, state.rows.map { it.note.id }) {
+                    IconButton(onClick = vm::deleteSelected) { Icon(Icons.Default.Delete, contentDescription = "Delete") }
+                }
+            } else {
+                TopAppBar(
+                    title = { Text("Notes") },
+                    actions = {
+                        IconButton(onClick = onSettings) { Icon(Icons.Default.Settings, contentDescription = "Settings") }
+                        Box {
+                            IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, contentDescription = "More") }
+                            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                                DropdownMenuItem(text = { Text("Select notes") }, onClick = {
+                                    menu = false
+                                    state.rows.firstOrNull()?.let { selection.toggle(it.note.id) }
+                                })
+                                DropdownMenuItem(text = { Text("Recycle bin") }, onClick = { menu = false; onBin() })
+                            }
+                        }
+                    },
+                )
+            }
         },
         bottomBar = bottomBar,
         floatingActionButton = {
-            FloatingActionButton(onClick = onNew) { Icon(Icons.Default.Add, contentDescription = "New note") }
+            if (!selection.active) FloatingActionButton(onClick = onNew) { Icon(Icons.Default.Add, contentDescription = "New note") }
         },
     ) { padding ->
         Column(Modifier.padding(padding).fillMaxSize()) {
@@ -142,14 +161,12 @@ fun NotesScreen(
             when {
                 !state.loaded -> Unit
                 state.rows.isEmpty() -> Empty(
-                    if (query.isBlank() && selectedTag == null) "No notes yet. Tap + to write one.\n\n" +
-                        "Tips: #tags organise notes, [[Title]] links them, - [ ] makes a task, " +
-                        "@tomorrow 9:00 sets a reminder."
+                    if (query.isBlank() && selectedTag == null) "No notes yet. Tap + to write one."
                     else "Nothing found."
                 )
                 else -> LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 88.dp)) {
                     items(state.rows, key = { it.note.id }) { row ->
-                        NoteRowItem(row, state.terms, onClick = { onOpen(row.note.id) })
+                        NoteRowItem(row, state.terms, Modifier.selectable(selection, row.note.id) { onOpen(row.note.id) })
                         HorizontalDivider()
                     }
                 }
@@ -159,8 +176,8 @@ fun NotesScreen(
 }
 
 @Composable
-private fun NoteRowItem(row: NoteRow, terms: List<String>, onClick: () -> Unit) {
-    Column(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 10.dp)) {
+private fun NoteRowItem(row: NoteRow, terms: List<String>, modifier: Modifier) {
+    Column(Modifier.fillMaxWidth().then(modifier).padding(horizontal = 16.dp, vertical = 10.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (row.note.pinned) {
                 Icon(Icons.Default.Star, contentDescription = "Pinned", Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
@@ -179,7 +196,6 @@ private fun NoteRowItem(row: NoteRow, terms: List<String>, onClick: () -> Unit) 
         }
         val details = buildList {
             if (row.openTasks > 0) add("${row.openTasks} open task${if (row.openTasks == 1) "" else "s"}")
-            row.nextReminder?.let { add("⏰ ${formatWhen(it)}") }
             if (row.tags.isNotEmpty()) add(row.tags.joinToString(" ") { "#$it" })
         }
         if (details.isNotEmpty()) {
@@ -230,15 +246,17 @@ fun EditorScreen(vm: EditorViewModel, onBack: () -> Unit, onOpen: (Long) -> Unit
             TextField(
                 value = vm.title, onValueChange = vm::onTitleChange, readOnly = !vm.loaded,
                 placeholder = { Text("Title") }, textStyle = MaterialTheme.typography.headlineSmall,
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(capitalization = androidx.compose.ui.text.input.KeyboardCapitalization.Sentences),
                 colors = fieldColors, modifier = Modifier.fillMaxWidth(),
             )
             TextField(
                 value = vm.body, onValueChange = vm::onBodyChange, readOnly = !vm.loaded,
-                placeholder = { Text("Write here… #tag, [[Other note]], - [ ] task, @tomorrow 9:00") },
+                placeholder = { Text("Type something…") },
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(capitalization = androidx.compose.ui.text.input.KeyboardCapitalization.Sentences),
                 colors = fieldColors, modifier = Modifier.fillMaxWidth(),
             )
             // A link to this note itself opens nothing (it is already open).
-            NoteInfo(info, onOpen = { if (it != vm.id) onOpen(it) }, onCreateLinked = onCreateLinked)
+            NoteInfo(info, onOpen = { if (it != vm.id) onOpen(it) }, onCreateLinked = onCreateLinked, onTick = vm::toggleCheckbox)
         }
     }
 
@@ -246,7 +264,7 @@ fun EditorScreen(vm: EditorViewModel, onBack: () -> Unit, onOpen: (Long) -> Unit
         AlertDialog(
             onDismissRequest = { confirmDelete = false },
             title = { Text("Delete this note?") },
-            text = { Text("Its reminders are cancelled too. This can't be undone.") },
+            text = { Text("It goes to the recycle bin, where it can be restored.") },
             confirmButton = { TextButton(onClick = { confirmDelete = false; vm.delete() }) { Text("Delete") } },
             dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancel") } },
         )
@@ -254,22 +272,18 @@ fun EditorScreen(vm: EditorViewModel, onBack: () -> Unit, onOpen: (Long) -> Unit
 }
 
 @Composable
-private fun NoteInfo(info: EditorInfo, onOpen: (Long) -> Unit, onCreateLinked: (String) -> Unit) {
-    val now = LocalDateTime.now()
+private fun NoteInfo(info: EditorInfo, onOpen: (Long) -> Unit, onCreateLinked: (String) -> Unit, onTick: (Int, String) -> Unit) {
     Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (info.tags.isNotEmpty()) Text(info.tags.joinToString(" ") { "#$it" }, color = MaterialTheme.colorScheme.primary)
-        if (info.reminders.isNotEmpty()) {
-            Section("Reminders")
-            info.reminders.forEach { r ->
-                val note = when {
-                    r.done -> " (done)"
-                    !r.at.isAfter(now) -> " (passed)"
-                    else -> ""
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Notifications, contentDescription = null, Modifier.size(16.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("${formatWhen(r.at)}$note  ${r.text}", style = MaterialTheme.typography.bodyMedium)
+        if (info.checklist.isNotEmpty()) {
+            Section("Checklist")
+            info.checklist.forEach { task ->
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { onTick(task.line, task.text) }) {
+                    androidx.compose.material3.Checkbox(checked = task.done, onCheckedChange = { onTick(task.line, task.text) })
+                    Text(
+                        task.text.ifBlank { "(empty)" },
+                        textDecoration = if (task.done) androidx.compose.ui.text.style.TextDecoration.LineThrough else null,
+                    )
                 }
             }
         }

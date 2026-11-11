@@ -72,16 +72,14 @@ private const val COPY_LIMIT = 200_000
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(onBack: () -> Unit) {
+fun SettingsScreen(onBack: () -> Unit, onBin: () -> Unit) {
     val context = LocalContext.current
     val app = context.applicationContext as SmartNotesApp
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("Settings") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
-                },
+                navigationIcon = { BackButton(onBack) },
             )
         },
     ) { padding ->
@@ -94,6 +92,10 @@ fun SettingsScreen(onBack: () -> Unit) {
             if (!app.updates.supported) Text("Debug build (${context.packageName})", style = MaterialTheme.typography.bodySmall)
             HorizontalDivider(Modifier.padding(vertical = 8.dp))
             AppearanceSection(app.settings)
+            HorizontalDivider(Modifier.padding(vertical = 8.dp))
+            RemindersSection(app.settings)
+            HorizontalDivider(Modifier.padding(vertical = 8.dp))
+            BinSection(app.settings, onBin)
             HorizontalDivider(Modifier.padding(vertical = 8.dp))
             UpdatesSection(app)
             HorizontalDivider(Modifier.padding(vertical = 8.dp))
@@ -151,6 +153,47 @@ private fun AppearanceSection(settings: AppSettings) {
         TextButton(onClick = { settings.setTextScale(1f) }, enabled = scale != 1f) { Text("Reset") }
     }
     Hint("On top of the phone's own font size (Settings → Display on the phone).")
+    val dateStyle by settings.dateStyle.collectAsStateWithLifecycle()
+    val today = remember { java.time.LocalDate.now() }
+    ChoiceRow(
+        "Date format", dateStyle.format(today), io.github.baslawson.smartnotes.DateStyle.entries,
+        { it.format(today) }, settings::setDateStyle,
+    )
+    Hint("For shopping lists and task dates. Today, Tomorrow and Yesterday are still written out.")
+}
+
+// ---------- Recycle bin ----------
+
+@Composable
+private fun BinSection(settings: AppSettings, onBin: () -> Unit) {
+    val keep by settings.keepFor.collectAsStateWithLifecycle()
+    Heading("Recycle bin")
+    ChoiceRow("Keep deleted items for", keep.label, io.github.baslawson.smartnotes.KeepFor.entries, { it.label }, settings::setKeepFor)
+    Hint("Deleted notes, tasks and shopping lists stay in the bin this long, then are erased when the app starts.")
+    OutlinedButton(onClick = onBin) { Text("Open recycle bin") }
+}
+
+// ---------- Reminders ----------
+
+@Composable
+private fun RemindersSection(settings: AppSettings) {
+    val context = LocalContext.current
+    val sound by settings.reminderSound.collectAsStateWithLifecycle()
+    Heading("Reminders")
+    ChoiceRow(
+        "Default sound", sound.label,
+        io.github.baslawson.smartnotes.reminders.ReminderSound.entries.filter { it != io.github.baslawson.smartnotes.reminders.ReminderSound.DEFAULT },
+        { it.label }, settings::setReminderSound,
+    )
+    Hint(
+        "Used by shopping lists and tasks set to Default. Ringing uses the alarm sound and rings in " +
+            "silent and vibrate mode too; \"until I stop it\" gives up after 10 minutes."
+    )
+    OutlinedButton(onClick = { io.github.baslawson.smartnotes.reminders.AlarmService.test(context, sound) }) { Text("Test alarm") }
+    if (!io.github.baslawson.smartnotes.reminders.Notifications.canNotify(context)) {
+        Text("Notifications are off for SmartNotes, so reminders can't show. Allow them in the phone's app settings.",
+            color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+    }
 }
 
 // ---------- Updates ----------

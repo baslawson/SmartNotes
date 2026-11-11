@@ -1,26 +1,63 @@
 # SmartNotes
 
-An offline Android notes app (Kotlin, Jetpack Compose, Room). Everything "smart" is read from the note's plain
-text, so the text stays the single source of truth:
+An offline Android app (Kotlin, Jetpack Compose, Room) with three parts: **Notes**, a **Tasks** checklist and **Shopping**
+lists, each with reminders that work like Planner's.
+
+## Notes
+
+Everything "smart" in a note is read from its plain text, so the text stays the single source of truth:
 
 | Write | You get |
 |---|---|
 | `#groceries` | a tag (filter by it on the Notes screen) |
 | `[[Trip plan]]` or `[[Trip plan\|shown]]` | a link to the note with that title; the other note lists it under *Linked from* |
-| `- [ ] buy milk` / `- [x] done` | a task, collected on the Tasks screen (tick it there or in the note) |
-| `@2026-11-20 14:00`, `@2026-11-20` (09:00) | a reminder notification |
-| `@today`, `@tomorrow`, `@fri`, `@friday` | turned into a date when you leave the note (on that weekday itself, it means today) |
+| `- [ ] buy milk` / `- [x] done` | a checkbox, ticked from the note's *Checklist* (it stays in the note; it isn't a to-do task) |
 
-Also:
-- **Search**: full-text across all notes (Room FTS4), word prefixes, matches highlighted.
-- **Related notes**: shown under each note, from shared tags and words.
-- **Shopping**: its own list. Type `2x milk`, `milk 2L` or `eggs x12`: the quantity is shown apart from the
-  name. Past items are suggested while typing (tap ✕ on a suggestion to forget it). Adding an item already
-  on the list doesn't make a second one. Open tasks in notes tagged `#shopping` (or with `#shopping` on the task line)
-  show under *From notes*.
-- **Share into SmartNotes**: text or a link shared from another app becomes a new note (the subject is its title).
-- **Settings**: version; theme (System / Light / Dark); text size (80–160 %, on top of the phone's own font size);
-  updates from GitHub; the debug log.
+Also: full-text search (Room FTS4, word prefixes, matches highlighted), related notes (shared tags and words), and
+**Share → SmartNotes** from other apps (text or a link becomes a new note; the subject is its title).
+
+## Tasks
+
+One anytime checklist, not linked to notes. Open tasks first (high priority first, marked "!"; low greyed; newest first
+within a priority), ticked ones below under *Done* (can be cleared). Tap a task for its details, priority and its own
+reminder: a date and time, its sound, and a repeat (every day / week / month / N days; monthly keeps its day, Jan 31 →
+Feb 28 → Mar 31). Ticking a repeating task moves its reminder to the next time instead.
+
+## Shopping
+
+Lists are dates: *+ New list* asks for a day and opens that day's list (one per day). *Anytime* is the undated list
+and can't be deleted. A dated list's ✎ changes its date or sets a reminder on that day (with its sound), or deletes it.
+Dates show as Today / Tomorrow or in Settings → Date format; the top bar shows the open list's day and full
+date. Type `2x milk`, `milk 2L` or `eggs x12`: the quantity shows apart from the name. Past items are suggested while
+typing (✕ forgets one), and an item already on the list isn't added twice. The reminder lists what is still to buy.
+
+## Selecting, deleting and the recycle bin
+
+Long-press a note, task or shopping list (its chip) to select it; tap more to add them; the top bar then has
+*Select all* and *Delete* (✕ or Back stops selecting). Deleting, here or from a note's or task's own screen, moves
+things to the **recycle bin** (reminders cancelled) and shows *Undo* for a moment; ✕ on a single shopping item removes
+it at once, also with *Undo*. The bin (Notes ⋮ menu, or Settings → Recycle bin) lists deleted notes, tasks and lists
+with the days left; tap one to *Restore* or *Delete forever*, long-press to do several, or *Empty bin*. Settings →
+Recycle bin → *Keep deleted items for* 7 / 30 (default) / 90 days or Forever; older ones are erased when the app
+starts. A restored list whose day has another list by now comes back without a date.
+
+## Reminders
+
+As in Planner: exact alarms (on time when the phone sleeps), set again after a restart, an app update, or a clock or
+time-zone change; one whose time passed while the phone was off shows afterwards as *Missed*. A reminder's sound is
+*Notification sound only* or rings the alarm sound through silent and vibrate mode for 10 s, 30 s, 1 min or until
+stopped (it gives up after 10 minutes, leaving a missed notification). *Default* is Settings → Reminders (Ring 10
+seconds to start with). Buttons: **Done** (ticks the task; dismisses a shopping list's), **Snooze**
+(10 minutes, 1 hour, tomorrow at 9 am) and, while ringing, **Stop** (a timed ring then leaves its notification; so does
+cancelling Snooze). Done on an old notification does nothing once the task has moved on. Alarms are also set again
+each time the app starts (a force-stop clears them). Tapping a reminder opens its task or list. Notes have no reminders (until 0.2.0 `@dates` in notes did;
+any still set are cancelled).
+
+## Settings
+
+Version; theme (System / Light / Dark); text size (80–160 %, on top of the phone's own font size); date format
+(12/11/2026, Wed 12 Nov, 11/12/2026 or 2026-11-12, for shopping lists and tasks); reminder sound
+and *Test alarm*; updates from GitHub; the debug log. Every screen but Notes has a back arrow.
 
 ## Updates
 
@@ -62,9 +99,10 @@ back are on.
 
 ```
 app/src/main/java/io/github/baslawson/smartnotes/
-  parse/       NoteParser (tags, links, tasks, reminders, dates), Search, Related, Shopping: plain Kotlin, unit tested
-  data/        Room entities and DAOs, NoteRepository, ShoppingRepository, Updates (GitHub releases)
-  reminders/   WorkManager scheduling, the reminder worker, notifications
+  parse/       NoteParser (tags, links, checkboxes, reminders, dates), Search, Related, Shopping: plain Kotlin, unit tested
+  data/        Room entities and DAOs, Note/Todo/Shopping repositories, Updates (GitHub releases)
+  reminders/   ReminderRules (sounds, repeat, snooze, alarm planning; unit tested), AlarmScheduler and receivers,
+               AlarmService (ringing), SnoozeActivity
   ui/          screens and their ViewModels
   AppLog.kt    the debug log;  AppSettings.kt  theme and text size
   MainActivity.kt, SmartNotesApp.kt
@@ -73,9 +111,9 @@ app/schemas/   Room schema per database version (for migrations)
 
 ## Known limits
 
-- Reminders use WorkManager, so Android may deliver them a few minutes late when the phone is idle. Samsung's
-  battery management ("Sleeping apps") can delay them further: set SmartNotes to *Unrestricted* under
-  App info → Battery if reminders arrive late.
+- Reminders wait for the first unlock after a restart (Planner can ring before it; SmartNotes doesn't yet).
+- Samsung's battery management ("Sleeping apps") can still hold an app back: if reminders don't come, set
+  SmartNotes to *Unrestricted* under App info → Battery.
 - Only text can be shared in (not images or files).
 - The notification permission is asked once, on first start (Android 13+).
 

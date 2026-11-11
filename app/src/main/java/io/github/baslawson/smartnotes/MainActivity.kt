@@ -28,6 +28,23 @@ import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import io.github.baslawson.smartnotes.ui.RecycleBinScreen
+import io.github.baslawson.smartnotes.ui.BinViewModel
+import kotlinx.coroutines.flow.collectLatest
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
+import androidx.compose.runtime.remember
+import androidx.compose.material3.SnackbarResult
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.graphics.Color
@@ -57,7 +74,10 @@ import io.github.baslawson.smartnotes.ui.SettingsScreen
 import io.github.baslawson.smartnotes.ui.ShoppingViewModel
 import io.github.baslawson.smartnotes.ui.UpdateDialog
 import io.github.baslawson.smartnotes.ui.TasksScreen
-import io.github.baslawson.smartnotes.ui.TasksViewModel
+import io.github.baslawson.smartnotes.ui.TodoEditorScreen
+import io.github.baslawson.smartnotes.ui.TodoEditorViewModel
+import io.github.baslawson.smartnotes.ui.TodoViewModel
+import io.github.baslawson.smartnotes.reminders.AlarmService
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 
@@ -66,7 +86,8 @@ import kotlinx.coroutines.launch
  * window (and across turning the phone), so with two SmartNotes windows open the right one opens it.
  */
 class PendingOpen : ViewModel() {
-    val noteId = MutableStateFlow<Long?>(null)
+    /** A navigation route ("note/5?title=", "todo/3", "shopping?list=2"). */
+    val route = MutableStateFlow<String?>(null)
 }
 
 class MainActivity : ComponentActivity() {
@@ -94,15 +115,23 @@ class MainActivity : ComponentActivity() {
                 // Navigates only while visible; a note made while the window is hidden opens when it comes back.
                 LaunchedEffect(Unit) {
                     lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
-                        pending.noteId.collect { id ->
-                            if (id != null) {
-                                pending.noteId.value = null
-                                nav.navigate(noteRoute(id))
+                        pending.route.collect { route ->
+                            if (route != null) {
+                                pending.route.value = null
+                                // A shopping list opens as the Shopping tab, not on top of it. A route the app doesn't
+                                // know (another app can start this screen) is logged and ignored, not a crash.
+                                runCatching {
+                                    if (route.startsWith("shopping")) nav.navigate(route) { popUpTo(NOTES); launchSingleTop = true }
+                                    else nav.navigate(route)
+                                }.onFailure { AppLog.w("App", "Ignored an unknown screen: $route", it) }
                             }
                         }
                     }
                 }
-                AppNavHost(nav, app)
+                Box(Modifier.fillMaxSize()) {
+                    AppNavHost(nav, app)
+                    BinSnackbar(app, Modifier.align(Alignment.BottomCenter))
+                }
             }
         }
     }
@@ -116,7 +145,9 @@ class MainActivity : ComponentActivity() {
         // Reopened from Recents, Android hands back the intent that first started the task: already handled then.
         if (intent == null || intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0) return
         if (intent.action == Intent.ACTION_SEND) return receiveShare(intent)
-        intent.getLongExtra(EXTRA_NOTE_ID, 0L).takeIf { it != 0L }?.let { pending.noteId.value = it }
+        // A tapped reminder: stops its ringing, then opens what it is about.
+        AlarmService.stopFromTap(this, intent.getStringExtra(AlarmService.EXTRA_STOP_TOKEN))
+        intent.getStringExtra(EXTRA_ROUTE)?.let { pending.route.value = it }
     }
 
     /**
@@ -133,25 +164,28 @@ class MainActivity : ComponentActivity() {
         }
         val app = application as SmartNotesApp
         val from = referrer?.host ?: "unknown app"
-        val target = pending.noteId
+        val target = pending.route
         // In the app's scope, so turning the phone or switching theme right now can't cancel the save.
         app.appScope.launch {
             val note = app.notes.saveFinal(0, subject.take(200), text)
             AppLog.i("Share", "Made note ${note?.id} from shared text (${text.length} characters, from $from)")
-            note?.let { target.value = it.id }
+            note?.let { target.value = noteRoute(it.id) }
         }
     }
 
     companion object {
-        const val EXTRA_NOTE_ID = "noteId"
+        const val EXTRA_ROUTE = "route"
     }
 }
 
 private const val NOTES = "notes"
 private const val TASKS = "tasks"
 private const val SHOPPING = "shopping"
+private const val SHOPPING_ROUTE = "shopping?list={list}"
+private const val TODO = "todo/{id}"
 private const val NOTE = "note/{id}?title={title}"
 private const val SETTINGS = "settings"
+private const val BIN = "bin"
 
 private fun noteRoute(id: Long, title: String = "") = "note/$id?title=${Uri.encode(title)}"
 
@@ -159,23 +193,39 @@ private fun noteRoute(id: Long, title: String = "") = "note/$id?title=${Uri.enco
 private fun AppNavHost(nav: NavHostController, app: SmartNotesApp) {
     val bottomBar: @Composable () -> Unit = { BottomBar(nav) }
     val open: (Long) -> Unit = { nav.navigate(noteRoute(it)) }
+    // Back on every screen but Notes: to wherever you came from (from a tab, that is Notes).
+    val back: () -> Unit = { if (!nav.popBackStack()) nav.navigate(NOTES) }
     NavHost(nav, startDestination = NOTES) {
         composable(NOTES) {
-            val vm = viewModel { NotesViewModel(app.notes) }
+            val vm = viewModel { NotesViewModel(app.notes, app.bin, app.appScope) }
             NotesScreen(
                 vm, onOpen = open, onNew = { nav.navigate(noteRoute(0)) },
-                onSettings = { nav.navigate(SETTINGS) }, bottomBar = bottomBar,
+                onSettings = { nav.navigate(SETTINGS) }, onBin = { nav.navigate(BIN) }, bottomBar = bottomBar,
             )
         }
         composable(TASKS) {
-            val vm = viewModel { TasksViewModel(app.notes, app.appScope) }
-            TasksScreen(vm, onOpen = open, bottomBar = bottomBar)
+            val vm = viewModel { TodoViewModel(app.todos, app.bin, app.appScope) }
+            TasksScreen(vm, onOpen = { nav.navigate("todo/$it") }, onBack = back, bottomBar = bottomBar)
         }
-        composable(SHOPPING) {
-            val vm = viewModel { ShoppingViewModel(app.shopping, app.notes, app.appScope) }
-            ShoppingScreen(vm, onOpen = open, bottomBar = bottomBar)
+        composable(SHOPPING_ROUTE, arguments = listOf(navArgument("list") { type = NavType.LongType; defaultValue = 0L })) { entry ->
+            val start = entry.arguments?.getLong("list") ?: 0L
+            val vm = viewModel { ShoppingViewModel(app.shopping, app.bin, app.appScope, app.getSharedPreferences("lists", android.content.Context.MODE_PRIVATE), start) }
+            // Opened again for another list (from a reminder): show that one.
+            LaunchedEffect(start) { if (start > 0) vm.select(start) }
+            val setting by app.settings.reminderSound.collectAsStateWithLifecycle()
+            ShoppingScreen(vm, setting, onBack = back, bottomBar = bottomBar)
         }
-        composable(SETTINGS) { SettingsScreen(onBack = { nav.popBackStack() }) }
+        composable(TODO, arguments = listOf(navArgument("id") { type = NavType.LongType })) { entry ->
+            val id = entry.arguments?.getLong("id") ?: 0L
+            val vm = viewModel { TodoEditorViewModel(app.todos, app.bin, app.appScope, id) }
+            val setting by app.settings.reminderSound.collectAsStateWithLifecycle()
+            TodoEditorScreen(vm, setting, onBack = back)
+        }
+        composable(SETTINGS) { SettingsScreen(onBack = back, onBin = { nav.navigate(BIN) }) }
+        composable(BIN) {
+            val vm = viewModel { BinViewModel(app.bin, app.appScope) }
+            RecycleBinScreen(vm, app.settings, onBack = back)
+        }
         composable(
             NOTE,
             arguments = listOf(
@@ -185,10 +235,10 @@ private fun AppNavHost(nav: NavHostController, app: SmartNotesApp) {
         ) { entry ->
             val id = entry.arguments?.getLong("id") ?: 0L
             val title = entry.arguments?.getString("title").orEmpty()
-            val vm = viewModel { EditorViewModel(app.notes, app.appScope, id, title) }
+            val vm = viewModel { EditorViewModel(app.notes, app.bin, app.appScope, id, title) }
             EditorScreen(
                 vm,
-                onBack = { nav.popBackStack() },
+                onBack = back,
                 onOpen = open,
                 onCreateLinked = { nav.navigate(noteRoute(0, it)) },
             )
@@ -196,10 +246,28 @@ private fun AppNavHost(nav: NavHostController, app: SmartNotesApp) {
     }
 }
 
+/** "Moved to the recycle bin · Undo" (and "Removed milk · Undo") after any delete, above the bottom bar. */
+@Composable
+private fun BinSnackbar(app: SmartNotesApp, modifier: Modifier) {
+    val host = remember { SnackbarHostState() }
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(Unit) {
+        // Only the window on screen takes the events (another, in the background, would swallow them).
+        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            app.bin.events.collectLatest { event ->
+                if (System.currentTimeMillis() - event.at > 10_000) return@collectLatest
+                val result = host.showSnackbar(event.text, actionLabel = "Undo", withDismissAction = false, duration = SnackbarDuration.Short)
+                if (result == SnackbarResult.ActionPerformed) app.appScope.launch { app.bin.undo(event) }
+            }
+        }
+    }
+    SnackbarHost(host, modifier.navigationBarsPadding().imePadding().padding(bottom = 80.dp))
+}
+
 @Composable
 private fun BottomBar(nav: NavHostController) {
     val current by nav.currentBackStackEntryAsState()
-    val route = current?.destination?.route
+    val route = current?.destination?.route?.substringBefore('?')
     NavigationBar {
         listOf(
             Triple(NOTES, "Notes", Icons.AutoMirrored.Filled.List),
@@ -254,8 +322,12 @@ private fun SmartNotesTheme(settings: AppSettings, content: @Composable (dark: B
         else -> lightColorScheme()
     }
     val density = LocalDensity.current
+    val dateStyle by settings.dateStyle.collectAsStateWithLifecycle()
     MaterialTheme(colorScheme = colors) {
-        CompositionLocalProvider(LocalDensity provides Density(density.density, density.fontScale * scale)) {
+        CompositionLocalProvider(
+            LocalDensity provides Density(density.density, density.fontScale * scale),
+            io.github.baslawson.smartnotes.ui.LocalDateStyle provides dateStyle,
+        ) {
             content(dark)
         }
     }
