@@ -3,4 +3,8 @@
 <full-backup-content>
     <exclude domain="sharedpref" path="app.xml" />
     <exclude domain="sharedpref" path="updates.xml" />
+    <exclude domain="sharedpref" path="state.xml" />
+    <exclude domain="sharedpref" path="lists.xml" />
+    <exclude domain="sharedpref" path="backup.xml" />
+    <exclude domain="file" path="backups/" />
 </full-backup-content>

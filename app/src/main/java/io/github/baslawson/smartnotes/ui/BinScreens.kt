@@ -30,7 +30,15 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Composable
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.FlowPreview
+import io.github.baslawson.smartnotes.SmartNotesApp
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -109,6 +117,29 @@ fun SelectableChip(text: String, current: Boolean, picked: Boolean, onClick: () 
     ) {
         Text(text, Modifier.padding(horizontal = 12.dp, vertical = 6.dp), style = MaterialTheme.typography.labelLarge)
     }
+}
+
+// ---------- Scrolling kept for next time ----------
+
+/** A list's scroll position, kept through a rotation and, in AppState, for the next time the app opens. */
+@OptIn(FlowPreview::class)
+@Composable
+fun rememberLastScroll(key: String): LazyListState {
+    val app = LocalContext.current.applicationContext as SmartNotesApp
+    val list = rememberSaveable(key, saver = LazyListState.Saver) {
+        val (index, offset) = app.state.scroll(key)
+        LazyListState(index, offset)
+    }
+    LaunchedEffect(list, key) {
+        snapshotFlow { list.firstVisibleItemIndex to list.firstVisibleItemScrollOffset }
+            .drop(1).debounce(400)
+            .collect { (index, offset) -> app.state.setScroll(key, index, offset) }
+    }
+    // Leaving (or switching lists) within the pause above still keeps the last position.
+    DisposableEffect(list, key) {
+        onDispose { app.state.setScroll(key, list.firstVisibleItemIndex, list.firstVisibleItemScrollOffset) }
+    }
+    return list
 }
 
 // ---------- Recycle bin ----------

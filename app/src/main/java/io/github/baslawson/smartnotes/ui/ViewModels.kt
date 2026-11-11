@@ -10,6 +10,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.baslawson.smartnotes.data.Note
+import io.github.baslawson.smartnotes.AppState
 import io.github.baslawson.smartnotes.data.BinKind
 import io.github.baslawson.smartnotes.data.NoteRepository
 import io.github.baslawson.smartnotes.data.RecycleBin
@@ -38,6 +39,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -80,7 +82,12 @@ data class NotesState(
 )
 
 @OptIn(FlowPreview::class, ExperimentalCoroutinesApi::class)
-class NotesViewModel(repo: NoteRepository, private val bin: RecycleBin, private val appScope: CoroutineScope) : ViewModel() {
+class NotesViewModel(
+    repo: NoteRepository,
+    private val bin: RecycleBin,
+    private val appScope: CoroutineScope,
+    private val saved: AppState? = null,
+) : ViewModel() {
     val selection = Selection()
 
     /** Moves the selected notes to the recycle bin. */
@@ -90,8 +97,14 @@ class NotesViewModel(repo: NoteRepository, private val bin: RecycleBin, private 
         appScope.launch { bin.trash(BinKind.NOTE, ids) }
     }
 
-    val query = MutableStateFlow("")
-    val tag = MutableStateFlow<String?>(null)
+    /** Kept for next time (AppState). */
+    val query = MutableStateFlow(saved?.notesQuery.orEmpty())
+    val tag = MutableStateFlow(saved?.notesTag)
+
+    init {
+        viewModelScope.launch { query.drop(1).collect { saved?.notesQuery = it } }
+        viewModelScope.launch { tag.drop(1).collect { saved?.notesTag = it } }
+    }
 
     val state: StateFlow<NotesState> = combine(
         query.debounce(150).flatMapLatest { q -> repo.search(q).map { q to it } },
@@ -148,6 +161,8 @@ class EditorViewModel(
     private val appScope: CoroutineScope,
     startId: Long,
     startTitle: String,
+    /** Raised by every restore (Settings → Backup): this editor's copy is then out of date, so it closes unsaved. */
+    restores: StateFlow<Long> = MutableStateFlow(0L),
 ) : ViewModel() {
     var id by mutableLongStateOf(startId)
         private set
@@ -198,6 +213,16 @@ class EditorViewModel(
         )
         EditorInfo(tags, links, backlinks, related, NoteParser.tasks(b))
     }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SHARING, EditorInfo())
+
+    init {
+        val at = restores.value
+        viewModelScope.launch {
+            restores.first { it != at }
+            deleted = true
+            draftJob?.cancel()
+            gone = true
+        }
+    }
 
     fun onTitleChange(value: TextFieldValue) {
         val changed = value.text != title.text
@@ -344,7 +369,8 @@ class EditorViewModel(
 // ---------- To-do ----------
 
 /** Remembers which list a screen showed last (per phone), so it opens there again. */
-private fun rememberedList(prefs: android.content.SharedPreferences?, key: String): Long = prefs?.getLong(key, 1L) ?: 1L
+/** The shopping list to show: [wanted] if it is still there, else null (then today's list opens). */
+fun listToShow(wanted: Long, lists: List<ShoppingList>): Long? = wanted.takeIf { id -> lists.any { it.id == id } }
 
 data class TodoState(val todos: List<Todo> = emptyList(), val loaded: Boolean = false)
 
@@ -382,6 +408,8 @@ class TodoEditorViewModel(
     private val bin: RecycleBin,
     private val appScope: CoroutineScope,
     id: Long,
+    /** Raised by every restore: this editor's copy is then out of date, so it closes unsaved. */
+    restores: StateFlow<Long> = MutableStateFlow(0L),
 ) : ViewModel() {
     var todo by mutableStateOf<Todo?>(null)
         private set
@@ -399,6 +427,15 @@ class TodoEditorViewModel(
         viewModelScope.launch {
             val loaded = repo.get(id)
             if (loaded == null) gone = true else { base = loaded; todo = loaded }
+        }
+        val at = restores.value
+        viewModelScope.launch {
+            restores.first { it != at }
+            saveJob?.cancel()
+            pending = false
+            base = null
+            todo = null
+            gone = true
         }
     }
 
@@ -491,7 +528,8 @@ class ShoppingViewModel(
     private val prefs: android.content.SharedPreferences?,
     startList: Long,
 ) : ViewModel() {
-    val listId = MutableStateFlow(if (startList > 0) startList else rememberedList(prefs, KEY))
+    /** The list shown: the one asked for (a reminder), else the last one looked at; 0 = none yet (today's opens). */
+    val listId = MutableStateFlow(if (startList > 0) startList else prefs?.getLong(KEY, 0L) ?: 0L)
     var input by mutableStateOf("")
 
     val state: StateFlow<ShoppingState> = combine(
@@ -538,6 +576,9 @@ class ShoppingViewModel(
     /** A save refused because another list has that date (made meanwhile, say in another window). */
     var dateTaken by mutableStateOf(false)
 
+    /** Shows today's list (made if needed): the first time, or when the list shown has gone (deleted elsewhere). */
+    fun openToday() = openDate(java.time.LocalDate.now())
+
     /** Shows the list for [date], making it first if needed. */
     fun openDate(date: java.time.LocalDate) = appScope.launch {
         val id = repo.listForDate(date)
@@ -558,6 +599,7 @@ class ShoppingViewModel(
         deleteLists(ids)
     }
 
+    /** Deleting the list being viewed shows Anytime (so Undo brings the list back with its date). */
     private fun deleteLists(ids: List<Long>) {
         if (listId.value in ids) select(1L)
         appScope.launch { bin.trash(BinKind.LIST, ids) }

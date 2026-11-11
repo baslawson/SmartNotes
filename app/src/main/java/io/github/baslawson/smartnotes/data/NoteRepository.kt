@@ -62,8 +62,8 @@ class NoteRepository(
 
     /** Erases notes in the bin: [ids], and every one deleted before [before]. */
     suspend fun erase(ids: List<Long>, before: Long = 0) = lock.withLock {
-        if (ids.isEmpty()) dao.erase(ids, before) else ids.chunked(CHUNK).forEach { dao.erase(it, before) }
-        AppLog.i("Notes", "Erased from the recycle bin: $ids" + if (before > 0) " and those deleted before $before" else "")
+        val count = if (ids.isEmpty()) dao.erase(ids, before) else ids.chunked(CHUNK).sumOf { dao.erase(it, before) }
+        if (count > 0) AppLog.i("Notes", "Erased $count note(s) from the recycle bin")
     }
 
     fun observeDeleted(): Flow<List<Note>> = dao.observeDeleted()

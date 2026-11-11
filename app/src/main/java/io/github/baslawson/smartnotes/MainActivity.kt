@@ -28,6 +28,8 @@ import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.navigation.NavController
+import androidx.compose.runtime.DisposableEffect
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import io.github.baslawson.smartnotes.ui.RecycleBinScreen
 import io.github.baslawson.smartnotes.ui.BinViewModel
@@ -88,6 +90,8 @@ import kotlinx.coroutines.launch
 class PendingOpen : ViewModel() {
     /** A navigation route ("note/5?title=", "todo/3", "shopping?list=2"). */
     val route = MutableStateFlow<String?>(null)
+    /** On a plain start: the screens to reopen where the app was last (see AppState). Used once. */
+    var restore: List<String>? = null
 }
 
 class MainActivity : ComponentActivity() {
@@ -99,6 +103,10 @@ class MainActivity : ComponentActivity() {
         val app = application as SmartNotesApp
         if (savedInstanceState == null) {
             handle(intent)
+            // Opened from the launcher or Recents (not a reminder or a share): back where it was last.
+            if (intent?.action != Intent.ACTION_SEND && intent?.getStringExtra(EXTRA_ROUTE) == null) {
+                pending.restore = AppState.routesFor(app.state.place)
+            }
             // A new version on GitHub, at most once a day (Settings → Updates); it only asks.
             app.appScope.launch { app.updates.checkIfDue() }
         }
@@ -114,6 +122,18 @@ class MainActivity : ComponentActivity() {
                 val nav = rememberNavController()
                 // Navigates only while visible; a note made while the window is hidden opens when it comes back.
                 LaunchedEffect(Unit) {
+                    pending.restore?.let { routes ->
+                        pending.restore = null
+                        routes.forEach { route ->
+                            runCatching {
+                                if (route == TASKS || route == SHOPPING) nav.navigate(route) {
+                                    popUpTo(NOTES) { saveState = true }
+                                    launchSingleTop = true
+                                    restoreState = true
+                                } else nav.navigate(route)
+                            }.onFailure { AppLog.w("App", "Couldn't reopen $route", it) }
+                        }
+                    }
                     lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
                         pending.route.collect { route ->
                             if (route != null) {
@@ -127,6 +147,14 @@ class MainActivity : ComponentActivity() {
                             }
                         }
                     }
+                }
+                // Remembers where the app is, to open there next time.
+                DisposableEffect(nav) {
+                    val listener = NavController.OnDestinationChangedListener { _, destination, args ->
+                        AppState.placeOf(destination.route, args?.getLong("id") ?: 0L)?.let { app.state.place = it }
+                    }
+                    nav.addOnDestinationChangedListener(listener)
+                    onDispose { nav.removeOnDestinationChangedListener(listener) }
                 }
                 Box(Modifier.fillMaxSize()) {
                     AppNavHost(nav, app)
@@ -197,7 +225,7 @@ private fun AppNavHost(nav: NavHostController, app: SmartNotesApp) {
     val back: () -> Unit = { if (!nav.popBackStack()) nav.navigate(NOTES) }
     NavHost(nav, startDestination = NOTES) {
         composable(NOTES) {
-            val vm = viewModel { NotesViewModel(app.notes, app.bin, app.appScope) }
+            val vm = viewModel { NotesViewModel(app.notes, app.bin, app.appScope, app.state) }
             NotesScreen(
                 vm, onOpen = open, onNew = { nav.navigate(noteRoute(0)) },
                 onSettings = { nav.navigate(SETTINGS) }, onBin = { nav.navigate(BIN) }, bottomBar = bottomBar,
@@ -217,7 +245,7 @@ private fun AppNavHost(nav: NavHostController, app: SmartNotesApp) {
         }
         composable(TODO, arguments = listOf(navArgument("id") { type = NavType.LongType })) { entry ->
             val id = entry.arguments?.getLong("id") ?: 0L
-            val vm = viewModel { TodoEditorViewModel(app.todos, app.bin, app.appScope, id) }
+            val vm = viewModel { TodoEditorViewModel(app.todos, app.bin, app.appScope, id, app.backups.restores) }
             val setting by app.settings.reminderSound.collectAsStateWithLifecycle()
             TodoEditorScreen(vm, setting, onBack = back)
         }
@@ -235,7 +263,7 @@ private fun AppNavHost(nav: NavHostController, app: SmartNotesApp) {
         ) { entry ->
             val id = entry.arguments?.getLong("id") ?: 0L
             val title = entry.arguments?.getString("title").orEmpty()
-            val vm = viewModel { EditorViewModel(app.notes, app.bin, app.appScope, id, title) }
+            val vm = viewModel { EditorViewModel(app.notes, app.bin, app.appScope, id, title, app.backups.restores) }
             EditorScreen(
                 vm,
                 onBack = back,

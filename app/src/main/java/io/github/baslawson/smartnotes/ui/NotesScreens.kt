@@ -54,6 +54,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -66,6 +67,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import io.github.baslawson.smartnotes.SmartNotesApp
 import io.github.baslawson.smartnotes.data.Note
 import io.github.baslawson.smartnotes.parse.NoteParser
 import io.github.baslawson.smartnotes.parse.Search
@@ -164,7 +166,7 @@ fun NotesScreen(
                     if (query.isBlank() && selectedTag == null) "No notes yet. Tap + to write one."
                     else "Nothing found."
                 )
-                else -> LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 88.dp)) {
+                else -> LazyColumn(Modifier.fillMaxSize(), rememberLastScroll("notes"), contentPadding = PaddingValues(bottom = 88.dp)) {
                     items(state.rows, key = { it.note.id }) { row ->
                         NoteRowItem(row, state.terms, Modifier.selectable(selection, row.note.id) { onOpen(row.note.id) })
                         HorizontalDivider()
@@ -220,6 +222,9 @@ fun EditorScreen(vm: EditorViewModel, onBack: () -> Unit, onOpen: (Long) -> Unit
     LifecycleEventEffect(Lifecycle.Event.ON_START) { vm.reload() }
     LifecycleEventEffect(Lifecycle.Event.ON_STOP) { vm.finish() }
     LaunchedEffect(vm.gone) { if (vm.gone) onBack() }
+    // A new note's route has no id: once it is saved, remember it as the place to reopen.
+    val app = LocalContext.current.applicationContext as SmartNotesApp
+    LaunchedEffect(vm.id) { if (vm.id > 0 && !vm.gone) app.state.place = "note/${vm.id}" }
 
     Scaffold(
         topBar = {

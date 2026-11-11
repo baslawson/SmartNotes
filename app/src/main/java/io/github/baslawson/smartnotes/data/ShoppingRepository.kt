@@ -29,6 +29,8 @@ class ShoppingRepository(
      */
     suspend fun add(listId: Long, input: String) = lock.withLock {
         val parsed = Shopping.parse(input) ?: return@withLock
+        // Only onto a list that is there (the screen may not have picked one yet, or it was just removed).
+        if (dao.list(listId).let { it == null || it.deletedAt != null }) return@withLock
         val key = Shopping.key(parsed.name)
         val now = clock.millis()
         val existing = dao.findByKey(listId, key)

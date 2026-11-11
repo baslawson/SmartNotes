@@ -28,6 +28,7 @@ class SnoozeActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         val kind = intent.getStringExtra(EXTRA_KIND)
         val ownerId = intent.getLongExtra(EXTRA_OWNER, 0L)
+        val missed = intent.getBooleanExtra(EXTRA_MISSED, false)
         val at = intent.getStringExtra(EXTRA_AT)?.let { runCatching { LocalDateTime.parse(it) }.getOrNull() }
         if (kind == null || at == null) { finish(); return }
         // Snoozing stops the ringing straight away; the dialog then asks for how long.
@@ -38,7 +39,7 @@ class SnoozeActivity : ComponentActivity() {
         // notification, not lost. Done in onDestroy, which every way of closing reaches.
         keepReminder = {
             if (kind != "test") app.appScope.launch {
-                app.alarms.content(kind, ownerId, at)?.let { Notifications.showReminder(app, it, silent = true) }
+                app.alarms.content(kind, ownerId, at)?.let { Notifications.showReminder(app, it, missed = missed, silent = true) }
             }
         }
         val cancel = { finish() }
@@ -78,12 +79,15 @@ class SnoozeActivity : ComponentActivity() {
         private const val EXTRA_KIND = "kind"
         private const val EXTRA_OWNER = "owner"
         private const val EXTRA_AT = "at"
+        private const val EXTRA_MISSED = "missed"
 
-        fun intent(context: Context, c: ReminderContent): PendingIntent = PendingIntent.getActivity(
+        /** [missed]: the button is on a "Missed:" notification, which stays one if the dialog is cancelled. */
+        fun intent(context: Context, c: ReminderContent, missed: Boolean = false): PendingIntent = PendingIntent.getActivity(
             context, Notifications.id(c.kind, c.ownerId, c.at) + 1,
             Intent(context, SnoozeActivity::class.java)
                 .setData(Uri.parse("smartnotes://snooze/${c.kind}/${c.ownerId}/${c.at}"))
                 .putExtra(EXTRA_KIND, c.kind).putExtra(EXTRA_OWNER, c.ownerId).putExtra(EXTRA_AT, c.at.toString())
+                .putExtra(EXTRA_MISSED, missed)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_HISTORY or Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )

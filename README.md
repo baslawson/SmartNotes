@@ -30,6 +30,13 @@ and can't be deleted. A dated list's ✎ changes its date or sets a reminder on 
 Dates show as Today / Tomorrow or in Settings → Date format; the top bar shows the open list's day and full
 date. Type `2x milk`, `milk 2L` or `eggs x12`: the quantity shows apart from the name. Past items are suggested while
 typing (✕ forgets one), and an item already on the list isn't added twice. The reminder lists what is still to buy.
+Shopping opens on the list you looked at last; the first time, or if that list is gone, on today's (made if needed).
+
+## Where you left off
+
+The app opens where it was left: the same tab, or the note or task that was open (Back goes to its list), with the
+Notes search and tag filter and each list's scroll position as they were. Not when it is opened from a reminder or a
+share, and Settings and the recycle bin aren't reopened. This is kept on the phone only (not in any backup).
 
 ## Selecting, deleting and the recycle bin
 
@@ -40,6 +47,18 @@ it at once, also with *Undo*. The bin (Notes ⋮ menu, or Settings → Recycle b
 with the days left; tap one to *Restore* or *Delete forever*, long-press to do several, or *Empty bin*. Settings →
 Recycle bin → *Keep deleted items for* 7 / 30 (default) / 90 days or Forever; older ones are erased when the app
 starts. A restored list whose day has another list by now comes back without a date.
+
+## Backup
+
+Settings → Backup. **Back up now** saves one file (`SmartNotes-backup-<date-time>.json`, readable JSON) wherever you
+pick: all notes, tasks and shopping lists (the recycle bin too), shopping suggestions and the settings. Not in it: the
+debug log, update state and alarms (set again from the tasks and lists). **Restore from file** checks the file first
+(not a backup, damaged, or from a newer SmartNotes: refused), says what it holds and asks, then **replaces everything**
+in the app in one go. A copy of what was there is kept first (the last 3), so **Undo last restore** puts it back.
+**Automatic backup** Off / Daily / Weekly writes into a folder you choose once (a phone folder or a synced one such as a
+cloud drive's) as `SmartNotes-auto-<date-time>.json` and keeps the newest 5 of those (backups made by hand are never
+removed); Settings shows the last backup's time or what went wrong. After a restore an open note or task closes, and
+the app forgets where it was left (those may be other notes now). Snoozed reminders aren't kept through a restore.
 
 ## Reminders
 
@@ -57,7 +76,7 @@ any still set are cancelled).
 
 Version; theme (System / Light / Dark); text size (80–160 %, on top of the phone's own font size); date format
 (12/11/2026, Wed 12 Nov, 11/12/2026 or 2026-11-12, for shopping lists and tasks); reminder sound
-and *Test alarm*; updates from GitHub; the debug log. Every screen but Notes has a back arrow.
+and *Test alarm*; the recycle bin; backup; updates from GitHub; the debug log. Every screen but Notes has a back arrow.
 
 ## Updates
 
@@ -99,12 +118,13 @@ back are on.
 
 ```
 app/src/main/java/io/github/baslawson/smartnotes/
-  parse/       NoteParser (tags, links, checkboxes, reminders, dates), Search, Related, Shopping: plain Kotlin, unit tested
-  data/        Room entities and DAOs, Note/Todo/Shopping repositories, Updates (GitHub releases)
+  parse/       NoteParser (tags, links, checkboxes), Search, Related, Shopping: plain Kotlin, unit tested
+  data/        Room entities and DAOs, Note/Todo/Shopping repositories, RecycleBin, Backups and BackupFormat,
+               Updates (GitHub releases)
   reminders/   ReminderRules (sounds, repeat, snooze, alarm planning; unit tested), AlarmScheduler and receivers,
                AlarmService (ringing), SnoozeActivity
   ui/          screens and their ViewModels
-  AppLog.kt    the debug log;  AppSettings.kt  theme and text size
+  AppLog.kt    the debug log;  AppSettings.kt  settings;  AppState.kt  where the app was left
   MainActivity.kt, SmartNotesApp.kt
 app/schemas/   Room schema per database version (for migrations)
 ```

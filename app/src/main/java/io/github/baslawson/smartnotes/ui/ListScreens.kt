@@ -218,7 +218,7 @@ fun TasksScreen(vm: TodoViewModel, onOpen: (Long) -> Unit, onBack: () -> Unit, b
             // Open tasks: high priority first, newest first within a priority. Ticked ones below.
             val open = state.todos.filter { !it.done }.sortedWith(compareByDescending<Todo> { it.priority }.thenByDescending { it.createdAt })
             val done = state.todos.filter { it.done }.sortedByDescending { it.doneAt }
-            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
+            LazyColumn(Modifier.fillMaxSize(), rememberLastScroll("tasks"), contentPadding = PaddingValues(bottom = 24.dp)) {
                 items(open, key = { "t:${it.id}" }) { t -> TodoLine(t, onCheck = { vm.setDone(t, it) }, Modifier.selectable(selection, t.id) { onOpen(t.id) }) }
                 if (done.isNotEmpty()) {
                     item(key = "h:done") {
@@ -418,7 +418,8 @@ fun ShoppingScreen(vm: ShoppingViewModel, setting: ReminderSound, onBack: () -> 
     // + New list: a date picker; that day's list is made (or opened, if there is one).
     var pickNew by rememberSaveable { mutableStateOf(false) }
     val list = state.lists.firstOrNull { it.id == listId }
-    LaunchedEffect(state.loaded, list) { if (state.loaded && list == null && state.lists.isNotEmpty()) vm.select(state.lists.first().id) }
+    // Nothing shown yet (the first time), or the list shown has gone: today's list.
+    LaunchedEffect(state.loaded, list) { if (state.loaded && listToShow(listId, state.lists) == null) vm.openToday() }
     val open = state.items.filter { !it.checked }
     val checked = state.items.filter { it.checked }
     val selection = vm.selection
@@ -489,7 +490,7 @@ fun ShoppingScreen(vm: ShoppingViewModel, setting: ReminderSound, onBack: () -> 
                 Empty("This list is empty. Type an item above.\n\nTap ✎ to give the list a date and a reminder.")
                 return@Column
             }
-            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
+            LazyColumn(Modifier.fillMaxSize(), rememberLastScroll("shopping:$listId"), contentPadding = PaddingValues(bottom = 24.dp)) {
                 items(open, key = { it.id }) { item ->
                     ItemLine(item, onCheck = { vm.setChecked(item, it) }, onDelete = { vm.delete(item) })
                 }

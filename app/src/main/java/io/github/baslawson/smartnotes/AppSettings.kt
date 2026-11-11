@@ -107,6 +107,21 @@ class AppSettings(private val prefs: SharedPreferences) {
         _textScale.value = s
     }
 
+    /** The settings a backup carries (see data/Backup.kt). */
+    fun export(): Map<String, Any> = mapOf(
+        "theme" to theme.value.name, "textScale" to textScale.value.toDouble(), "reminderSound" to reminderSound.value.name,
+        "dateStyle" to dateStyle.value.name, "keepFor" to keepFor.value.name,
+    )
+
+    /** Takes the settings of a backup being restored; unknown or missing ones are left as they are. */
+    fun import(values: Map<String, Any?>) {
+        (values["theme"] as? String)?.let { name -> ThemeMode.entries.firstOrNull { it.name == name } }?.let(::setTheme)
+        (values["textScale"] as? Number)?.let { setTextScale(it.toFloat()) }
+        (values["reminderSound"] as? String)?.let { name -> ReminderSound.entries.firstOrNull { it.name == name } }?.let(::setReminderSound)
+        (values["dateStyle"] as? String)?.let { name -> DateStyle.entries.firstOrNull { it.name == name } }?.let(::setDateStyle)
+        (values["keepFor"] as? String)?.let { name -> KeepFor.entries.firstOrNull { it.name == name } }?.let(::setKeepFor)
+    }
+
     companion object {
         const val MIN_SCALE = 0.8f
         const val MAX_SCALE = 1.6f

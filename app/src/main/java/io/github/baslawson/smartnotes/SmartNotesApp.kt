@@ -2,6 +2,7 @@ package io.github.baslawson.smartnotes
 
 import android.app.Application
 import androidx.core.content.pm.PackageInfoCompat
+import io.github.baslawson.smartnotes.data.Backups
 import io.github.baslawson.smartnotes.data.NoteDatabase
 import io.github.baslawson.smartnotes.data.NoteRepository
 import io.github.baslawson.smartnotes.data.RecycleBin
@@ -36,6 +37,15 @@ class SmartNotesApp : Application() {
     val bin by lazy { RecycleBin(notes, todos, shopping, settings) }
 
     val settings by lazy { AppSettings(getSharedPreferences("settings", MODE_PRIVATE)) }
+    /** Backups to a file or a folder, and restoring them (Settings → Backup). */
+    val backups by lazy {
+        Backups(this, database, settings, alarms, { versionName }, onRestored = {
+            state.forgetPlaces()
+            getSharedPreferences("lists", MODE_PRIVATE).edit().remove("shopping_list").apply()
+        })
+    }
+    /** Where the app was last (screen, search, scrolling), to open there again. */
+    val state by lazy { AppState(getSharedPreferences("state", MODE_PRIVATE)) }
 
     val versionName: String by lazy { packageManager.getPackageInfo(packageName, 0).versionName ?: "?" }
     val versionCode: Long by lazy { PackageInfoCompat.getLongVersionCode(packageManager.getPackageInfo(packageName, 0)) }
@@ -69,8 +79,12 @@ class SmartNotesApp : Application() {
         val version = PackageInfoCompat.getLongVersionCode(packageManager.getPackageInfo(packageName, 0))
         appScope.launch {
             if (prefs.getLong("scheduledFor", -1) != version) {
-                // Version 0.1.0 scheduled note reminders with WorkManager: those jobs go, exact alarms replace them.
-                runCatching { androidx.work.WorkManager.getInstance(this@SmartNotesApp).cancelAllWork() }
+                // Version 0.1.0 scheduled note reminders with WorkManager: those jobs go (by their worker's class name,
+                // which WorkManager adds as a tag), exact alarms replace them. Other jobs (automatic backups) stay.
+                runCatching {
+                    androidx.work.WorkManager.getInstance(this@SmartNotesApp)
+                        .cancelAllWorkByTag("io.github.baslawson.smartnotes.reminders.ReminderWorker")
+                }
                 prefs.edit().putLong("scheduledFor", version).apply()
             }
             // The first start since the phone restarted applies the restart rules (missed, not rung late), whether it
@@ -83,6 +97,7 @@ class SmartNotesApp : Application() {
             alarms.restoreAll(boot = firstSinceBoot)
             if (bootCount >= 0) prefs.edit().putInt("restoredBoot", bootCount).apply()
             bin.purge()
+            backups.schedule()
         }
     }
 }

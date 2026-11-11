@@ -274,6 +274,11 @@ class AlarmService : Service() {
             if (current == Triple(kind, ownerId, at)) stopToken?.let { requestStop(context, it) }
         }
 
+        /** Stops whatever is ringing. */
+        fun stopRinging(context: Context) {
+            stopToken?.let { requestStop(context, it) }
+        }
+
         /** Stops the ringing if it is [kind] [ownerId]'s, whatever its time. */
         fun stopOwner(context: Context, kind: String, ownerId: Long) {
             val ringing = current

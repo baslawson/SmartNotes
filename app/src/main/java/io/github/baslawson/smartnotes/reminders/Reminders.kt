@@ -175,6 +175,16 @@ class AlarmScheduler(private val context: Context, private val db: NoteDatabase,
         }
     }
 
+    /** Before a backup is restored: every alarm, notification and ringing goes (they are set again from the new data). */
+    suspend fun clearAll() {
+        lock.withLock {
+            alarms.all().forEach { cancelAlarm(it.id) }
+            alarms.deleteAll()
+        }
+        AlarmService.stopRinging(context)
+        androidx.core.app.NotificationManagerCompat.from(context).cancelAll()
+    }
+
     /** Its reminder gone (to the recycle bin): stops it ringing and removes its notifications. */
     fun dismiss(kind: String, ownerId: Long) {
         AlarmService.stopOwner(context, kind, ownerId)
@@ -352,7 +362,7 @@ object Notifications {
             .setAutoCancel(true)
             .setContentIntent(open(context, c.route, id))
             .apply { if (c.canDone) addAction(0, "Done", ReminderActionReceiver.done(context, c)) }
-            .addAction(0, "Snooze", SnoozeActivity.intent(context, c))
+            .addAction(0, "Snooze", SnoozeActivity.intent(context, c, missed))
             .build()
         try {
             NotificationManagerCompat.from(context).notify(tag(c.kind, c.ownerId), id, notification)

@@ -34,10 +34,20 @@ interface NoteDao {
 
     /** Erases notes in the bin: those of [ids], or (ids null) all deleted before [before]. */
     @Query("DELETE FROM notes WHERE deletedAt IS NOT NULL AND (id IN (:ids) OR deletedAt < :before)")
-    suspend fun erase(ids: List<Long>, before: Long)
+    suspend fun erase(ids: List<Long>, before: Long): Int
 
     @Insert
     suspend fun insert(note: Note): Long
+
+    // For backups: every note (in the recycle bin too), and replacing them all.
+    @Query("SELECT * FROM notes ORDER BY id")
+    suspend fun everyNote(): List<Note>
+
+    @Insert
+    suspend fun insertAll(notes: List<Note>)
+
+    @Query("DELETE FROM notes")
+    suspend fun deleteAll()
 
     @Update
     suspend fun update(note: Note)
@@ -110,6 +120,31 @@ interface ShoppingDao {
     @Upsert
     suspend fun upsertHistory(history: ShoppingHistory)
 
+    // For backups.
+    @Query("SELECT * FROM shopping_items ORDER BY id")
+    suspend fun allItems(): List<ShoppingItem>
+
+    @Query("SELECT * FROM shopping_history")
+    suspend fun allHistory(): List<ShoppingHistory>
+
+    @Insert
+    suspend fun insertLists(lists: List<ShoppingList>)
+
+    @Insert
+    suspend fun insertItems(items: List<ShoppingItem>)
+
+    @Insert
+    suspend fun insertHistory(history: List<ShoppingHistory>)
+
+    @Query("DELETE FROM shopping_items")
+    suspend fun deleteAllItems()
+
+    @Query("DELETE FROM shopping_lists")
+    suspend fun deleteAllLists()
+
+    @Query("DELETE FROM shopping_history")
+    suspend fun deleteAllHistory()
+
     @Query("DELETE FROM shopping_items WHERE id = :id")
     suspend fun delete(id: Long)
 
@@ -127,6 +162,13 @@ interface TodoDao {
 
     @Query("SELECT * FROM todos")
     suspend fun all(): List<Todo>
+
+    // For backups.
+    @Insert
+    suspend fun insertAll(todos: List<Todo>)
+
+    @Query("DELETE FROM todos")
+    suspend fun deleteAll()
 
     @Query("SELECT * FROM todos WHERE deletedAt IS NOT NULL ORDER BY deletedAt DESC")
     fun observeDeleted(): Flow<List<Todo>>
@@ -176,4 +218,7 @@ interface AlarmDao {
 
     @Query("DELETE FROM alarms WHERE id = :id")
     suspend fun delete(id: Long)
+
+    @Query("DELETE FROM alarms")
+    suspend fun deleteAll()
 }

@@ -7,6 +7,11 @@ import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
 import android.widget.Toast
+import io.github.baslawson.smartnotes.data.BackupException
+import io.github.baslawson.smartnotes.data.BackupData
+import io.github.baslawson.smartnotes.data.AutoBackup
+import androidx.compose.runtime.LaunchedEffect
+import android.provider.DocumentsContract
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -97,6 +102,8 @@ fun SettingsScreen(onBack: () -> Unit, onBin: () -> Unit) {
             HorizontalDivider(Modifier.padding(vertical = 8.dp))
             BinSection(app.settings, onBin)
             HorizontalDivider(Modifier.padding(vertical = 8.dp))
+            BackupSection(app)
+            HorizontalDivider(Modifier.padding(vertical = 8.dp))
             UpdatesSection(app)
             HorizontalDivider(Modifier.padding(vertical = 8.dp))
             LogSection(app)
@@ -171,6 +178,133 @@ private fun BinSection(settings: AppSettings, onBin: () -> Unit) {
     ChoiceRow("Keep deleted items for", keep.label, io.github.baslawson.smartnotes.KeepFor.entries, { it.label }, settings::setKeepFor)
     Hint("Deleted notes, tasks and shopping lists stay in the bin this long, then are erased when the app starts.")
     OutlinedButton(onClick = onBin) { Text("Open recycle bin") }
+}
+
+// ---------- Backup ----------
+
+@Composable
+private fun BackupSection(app: SmartNotesApp) {
+    val context = LocalContext.current
+    val backups = app.backups
+    val status by backups.status.collectAsStateWithLifecycle()
+    val style = LocalDateStyle.current
+    val busy by backups.busy.collectAsStateWithLifecycle()
+    // A picked backup file waiting for "Restore?" (its uri survives turning the phone; it is read again then).
+    var pendingUri by rememberSaveable { mutableStateOf<String?>(null) }
+    var pending by remember { mutableStateOf<BackupData?>(null) }
+    var confirmUndo by rememberSaveable { mutableStateOf(false) }
+    val canUndo = remember(busy) { backups.canUndoRestore() }
+
+    fun toast(text: String) = Toast.makeText(context, text, Toast.LENGTH_LONG).show()
+    // In the app's scope: leaving the screen doesn't cut a backup or restore short.
+    fun work(action: suspend () -> String) {
+        val appContext = context.applicationContext
+        app.appScope.launch {
+            val message = try { action() } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                AppLog.w("Backup", "Failed", e)
+                (e as? BackupException)?.message ?: "That didn't work: ${e.message ?: e.javaClass.simpleName}"
+            }
+            withContext(Dispatchers.Main) { Toast.makeText(appContext, message, Toast.LENGTH_LONG).show() }
+        }
+    }
+
+    val exportFile = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        if (uri != null) work { "Backed up: " + backups.exportTo(uri).summary() }
+    }
+    val openFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) { pending = null; pendingUri = uri.toString() }
+    }
+    val pickFolder = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri != null) {
+            val name = runCatching {
+                val doc = DocumentsContract.buildDocumentUriUsingTree(uri, DocumentsContract.getTreeDocumentId(uri))
+                context.contentResolver.query(doc, arrayOf(DocumentsContract.Document.COLUMN_DISPLAY_NAME), null, null, null)
+                    ?.use { if (it.moveToFirst()) it.getString(0) else null }
+            }.getOrNull()
+            runCatching { backups.setFolder(uri, name) }.onFailure { toast("That folder can't be used for backups.") }
+        }
+    }
+    LaunchedEffect(pendingUri) {
+        val uri = pendingUri ?: return@LaunchedEffect
+        if (pending != null) return@LaunchedEffect
+        try {
+            pending = backups.read(Uri.parse(uri))
+        } catch (e: Exception) {
+            pendingUri = null
+            toast((e as? BackupException)?.message ?: "Couldn't read that file.")
+        }
+    }
+
+    Heading("Backup")
+    Hint("A backup is one file with all your notes, tasks and shopping lists (the recycle bin too) and these settings.")
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        OutlinedButton(onClick = { exportFile.launch(backups.fileName()) }, enabled = !busy) { Text("Back up now") }
+        OutlinedButton(onClick = { openFile.launch(arrayOf("application/json", "application/octet-stream", "text/plain")) }, enabled = !busy) {
+            Text("Restore from file")
+        }
+    }
+    if (canUndo) TextButton(onClick = { confirmUndo = true }, enabled = !busy) { Text("Undo last restore") }
+    if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+
+    Text("Automatic backup", Modifier.padding(top = 8.dp))
+    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+        AutoBackup.entries.forEachIndexed { i, a ->
+            SegmentedButton(
+                selected = status.auto == a, onClick = { backups.setAuto(a) },
+                shape = SegmentedButtonDefaults.itemShape(i, AutoBackup.entries.size),
+            ) { Text(a.label) }
+        }
+    }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            "Folder: " + (status.folderName ?: if (status.folder != null) "chosen" else "none yet"),
+            Modifier.weight(1f),
+        )
+        TextButton(onClick = { pickFolder.launch(null) }) { Text(if (status.folder == null) "Choose" else "Change") }
+    }
+    when {
+        status.auto != AutoBackup.OFF && status.folder == null -> Hint("Choose a folder for the automatic backups.")
+        status.lastError != null -> Text(status.lastError!!, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+        status.lastAt > 0 -> Hint("Last backup: " + java.time.Instant.ofEpochMilli(status.lastAt).atZone(java.time.ZoneId.systemDefault()).let {
+            style.dayLabel(it.toLocalDate()) + " " + it.toLocalTime().withSecond(0).withNano(0)
+        })
+    }
+    if (status.auto != AutoBackup.OFF) Hint("The newest 5 automatic backups are kept in that folder; older ones are removed.")
+
+    pending?.let { data ->
+        val made = java.time.Instant.ofEpochMilli(data.createdAt).atZone(java.time.ZoneId.systemDefault()).toLocalDate()
+        AlertDialog(
+            onDismissRequest = { pending = null; pendingUri = null },
+            title = { Text("Restore this backup?") },
+            text = {
+                Text(
+                    "From ${style.format(made)}: ${data.summary()}.\n\nThis replaces everything in the app now. " +
+                        "A copy of what's there now is kept, so you can undo it."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    pending = null
+                    pendingUri = null
+                    work { backups.restore(data); "Restored: " + data.summary() }
+                }) { Text("Restore") }
+            },
+            dismissButton = { TextButton(onClick = { pending = null; pendingUri = null }) { Text("Cancel") } },
+        )
+    }
+    if (confirmUndo) {
+        AlertDialog(
+            onDismissRequest = { confirmUndo = false },
+            title = { Text("Undo the last restore?") },
+            text = { Text("The app goes back to what it had before that restore.") },
+            confirmButton = {
+                TextButton(onClick = { confirmUndo = false; work { backups.undoRestore(); "Back to before the restore" } }) { Text("Undo restore") }
+            },
+            dismissButton = { TextButton(onClick = { confirmUndo = false }) { Text("Cancel") } },
+        )
+    }
 }
 
 // ---------- Reminders ----------
