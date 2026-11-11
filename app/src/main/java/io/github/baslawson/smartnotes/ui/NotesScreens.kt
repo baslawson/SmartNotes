@@ -110,10 +110,9 @@ fun NotesScreen(
     val query by vm.query.collectAsStateWithLifecycle()
     val selectedTag by vm.tag.collectAsStateWithLifecycle()
     val sort by vm.sort.collectAsStateWithLifecycle()
-    // Dragging is for the whole list: not while searching, filtering by a tag or selecting.
-    // (state.terms: the rows shown still belong to a search until it has cleared.)
-    val canArrange = sort == NoteSort.MINE && query.isBlank() && state.terms.isEmpty() && selectedTag == null && state.tag == null &&
-        !selection.active
+    // Handles in every order (a drop switches to My order), for the whole list: not while searching, filtering by a tag
+    // or selecting. (state.terms / state.tag: the rows shown still belong to a search or filter until it has cleared.)
+    val canArrange = query.isBlank() && state.terms.isEmpty() && selectedTag == null && state.tag == null && !selection.active
 
     Scaffold(
         topBar = {
@@ -183,7 +182,7 @@ fun NotesScreen(
                 else -> {
                     val list = rememberLastScroll("notes")
                     val byId = state.rows.associateBy { it.note.id }
-                    val order = rememberDragOrder(state.rows.map { it.note.id })
+                    val order = rememberDragOrder(state.rows.map { it.note.id }, sort == NoteSort.MINE)
                     val reorder = rememberReorderableLazyListState(list) { from, to ->
                         val a = from.key as? Long
                         val b = to.key as? Long
@@ -199,7 +198,7 @@ fun NotesScreen(
                                             NoteRowItem(row, state.terms, Modifier.weight(1f).selectable(selection, row.note.id) { onOpen(row.note.id) })
                                             if (canArrange) DragHandleIcon(
                                                 row.title,
-                                                Modifier.draggableHandle(onDragStarted = { order.start() }, onDragStopped = { vm.arrange(order.stop()) }).padding(12.dp),
+                                                Modifier.draggableHandle(onDragStarted = { order.start() }, onDragStopped = { order.stop()?.let(vm::arrange) }).padding(12.dp),
                                             )
                                         }
                                         HorizontalDivider()
@@ -331,7 +330,8 @@ private fun NoteInfo(info: EditorInfo, onOpen: (Long) -> Unit, onCreateLinked: (
         if (info.checklist.isNotEmpty()) {
             Section("Checklist")
             info.checklist.forEach { task ->
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { onTick(task.line, task.text) }) {
+                // Only the box ticks (a tap on the text does nothing).
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     androidx.compose.material3.Checkbox(checked = task.done, onCheckedChange = { onTick(task.line, task.text) })
                     Text(
                         task.text.ifBlank { "(empty)" },

@@ -103,6 +103,15 @@ class AppSettings(private val prefs: SharedPreferences) {
     private val _listSort = MutableStateFlow(enumOr(prefs.getString(KEY_LIST_SORT, null), ListSort.DATE))
     val listSort: StateFlow<ListSort> = _listSort.asStateFlow()
 
+    /** Whether done tasks / ticked shopping items are shown (hidden to start with). */
+    private val _showDoneTasks = MutableStateFlow(prefs.getBoolean(KEY_SHOW_DONE, false))
+    val showDoneTasks: StateFlow<Boolean> = _showDoneTasks.asStateFlow()
+    private val _showTickedItems = MutableStateFlow(prefs.getBoolean(KEY_SHOW_TICKED, false))
+    val showTickedItems: StateFlow<Boolean> = _showTickedItems.asStateFlow()
+
+    fun setShowDoneTasks(show: Boolean) { prefs.edit().putBoolean(KEY_SHOW_DONE, show).apply(); _showDoneTasks.value = show }
+    fun setShowTickedItems(show: Boolean) { prefs.edit().putBoolean(KEY_SHOW_TICKED, show).apply(); _showTickedItems.value = show }
+
     fun setNoteSort(sort: NoteSort) { prefs.edit().putString(KEY_NOTE_SORT, sort.name).apply(); _noteSort.value = sort }
     fun setTaskSort(sort: TaskSort) { prefs.edit().putString(KEY_TASK_SORT, sort.name).apply(); _taskSort.value = sort }
     fun setItemSort(sort: ItemSort) { prefs.edit().putString(KEY_ITEM_SORT, sort.name).apply(); _itemSort.value = sort }
@@ -143,6 +152,7 @@ class AppSettings(private val prefs: SharedPreferences) {
         "dateStyle" to dateStyle.value.name, "keepFor" to keepFor.value.name,
         "noteSort" to noteSort.value.name, "taskSort" to taskSort.value.name, "itemSort" to itemSort.value.name,
         "listSort" to listSort.value.name,
+        "showDoneTasks" to showDoneTasks.value, "showTickedItems" to showTickedItems.value,
         "arranged" to prefs.getStringSet(KEY_ARRANGED, emptySet()).orEmpty().sorted().joinToString(","),
     )
 
@@ -157,6 +167,8 @@ class AppSettings(private val prefs: SharedPreferences) {
         (values["taskSort"] as? String)?.let { name -> TaskSort.entries.firstOrNull { it.name == name } }?.let(::setTaskSort)
         (values["itemSort"] as? String)?.let { name -> ItemSort.entries.firstOrNull { it.name == name } }?.let(::setItemSort)
         (values["listSort"] as? String)?.let { name -> ListSort.entries.firstOrNull { it.name == name } }?.let(::setListSort)
+        (values["showDoneTasks"] as? Boolean)?.let(::setShowDoneTasks)
+        (values["showTickedItems"] as? Boolean)?.let(::setShowTickedItems)
         // The restored rows carry their own places; which sections were arranged goes with them (none in older backups).
         val arranged = (values["arranged"] as? String)?.split(',')?.filter { it.isNotBlank() }?.toSet().orEmpty()
         prefs.edit().putStringSet(KEY_ARRANGED, arranged).apply()
@@ -175,6 +187,8 @@ class AppSettings(private val prefs: SharedPreferences) {
         private const val KEY_ITEM_SORT = "sort_items"
         private const val KEY_LIST_SORT = "sort_lists"
         private const val KEY_ARRANGED = "arranged"
+        private const val KEY_SHOW_DONE = "show_done_tasks"
+        private const val KEY_SHOW_TICKED = "show_ticked_items"
 
         private inline fun <reified E : Enum<E>> enumOr(name: String?, default: E): E =
             enumValues<E>().firstOrNull { it.name == name } ?: default

@@ -2,44 +2,109 @@ package io.github.baslawson.smartnotes
 
 import io.github.baslawson.smartnotes.ui.DragOrder
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 class DragOrderTest {
     @Test fun aSecondDragStartsFromTheFirstOnesResult() {
-        val order = DragOrder(listOf(1, 2, 3))
+        val order = DragOrder(listOf(1, 2, 3), mine = true)
         order.start(); order.move(1, 3)
         assertEquals(listOf(2L, 3L, 1L), order.stop())
         // The saved order arrives from the database; the next drag starts from it, and its drop is what is saved.
-        order.sync(listOf(2, 3, 1))
+        order.sync(listOf(2, 3, 1), mine = true)
         order.start(); order.move(1, 2)
         assertEquals(listOf(1L, 2L, 3L), order.stop())
     }
 
-    @Test fun theDraggedOrderStaysUntilTheStoredOneChanges() {
-        val order = DragOrder(listOf(1, 2, 3))
+    @Test fun theDraggedOrderStaysUntilTheStoredOneMatches() {
+        val order = DragOrder(listOf(1, 2, 3), mine = true)
         order.start(); order.move(3, 1)
-        // A database change during the drag doesn't undo it.
-        order.sync(listOf(1, 2, 3, 4))
-        assertEquals(listOf(3L, 1L, 2L), order.ids)
         order.stop()
-        // After the drop, the stored order shows again once it changes.
-        order.sync(listOf(3, 1, 2, 4))
-        assertEquals(listOf(3L, 1L, 2L, 4L), order.ids)
+        // A different order with the same rows (the save not back yet) doesn't undo the drop on screen…
+        order.sync(listOf(2, 1, 3), mine = true)
+        assertEquals(listOf(3L, 1L, 2L), order.ids)
+        // …the saved one ends the wait.
+        order.sync(listOf(3, 1, 2), mine = true)
+        assertEquals(listOf(3L, 1L, 2L), order.ids)
+        order.sync(listOf(1, 3, 2), mine = true)
+        assertEquals(listOf(1L, 3L, 2L), order.ids)
+    }
+
+    @Test fun aDropInAnotherSortShowsNoOldPlacesWhileSwitchingToMyOrder() {
+        // A–Z on screen; the drop saves and then switches to My order, first seen with the old places.
+        val order = DragOrder(listOf(1, 2, 3), mine = false)
+        order.start(); order.move(1, 3)
+        assertEquals(listOf(2L, 3L, 1L), order.stop())
+        order.sync(listOf(3, 2, 1), mine = true) // old places
+        assertEquals(listOf(2L, 3L, 1L), order.ids)
+        order.sync(listOf(2, 3, 1), mine = true) // saved
+        assertEquals(listOf(2L, 3L, 1L), order.ids)
+    }
+
+    @Test fun choosingAnotherOrderEndsTheWait() {
+        val order = DragOrder(listOf(1, 2, 3), mine = true)
+        order.start(); order.move(1, 3)
+        order.stop()
+        order.sync(listOf(3, 1, 2), mine = false)
+        assertEquals(listOf(3L, 1L, 2L), order.ids)
+    }
+
+    @Test fun aDropInPlaceSavesNothing() {
+        val order = DragOrder(listOf(1, 2, 3), mine = false)
+        order.start(); order.move(1, 2); order.move(1, 1); order.move(2, 1)
+        assertNull(order.stop())
+        assertEquals(listOf(1L, 2L, 3L), order.ids)
     }
 
     @Test fun aRowAddedDuringADragIsntLeftHidden() {
-        val order = DragOrder(listOf(1, 2))
+        val order = DragOrder(listOf(1, 2), mine = true)
         order.start()
-        order.sync(listOf(1, 2, 3))
-        // Dropped without a move: the new row is in what is saved, and the stored order shows.
-        assertEquals(listOf(1L, 2L, 3L), order.stop())
+        order.sync(listOf(1, 2, 3), mine = true)
+        // Dropped without a move: nothing to save, and the new row shows.
+        assertNull(order.stop())
         assertEquals(listOf(1L, 2L, 3L), order.ids)
     }
 
     @Test fun aRowAddedDuringADragKeepsTheDraggedMove() {
-        val order = DragOrder(listOf(1, 2, 3))
+        val order = DragOrder(listOf(1, 2, 3), mine = true)
         order.start(); order.move(3, 1)
-        order.sync(listOf(4, 1, 2, 3))
+        order.sync(listOf(4, 1, 2, 3), mine = true)
         assertEquals(listOf(4L, 3L, 1L, 2L), order.stop())
+    }
+
+    @Test fun aSecondDragBackToTheOldOrderIsSavedEvenBeforeTheFirstSaveIsBack() {
+        val order = DragOrder(listOf(1, 2, 3), mine = true)
+        order.start(); order.move(1, 3)
+        assertEquals(listOf(2L, 3L, 1L), order.stop())
+        // The first save hasn't come back; the user drags it straight back.
+        order.start(); order.move(1, 2)
+        assertEquals(listOf(1L, 2L, 3L), order.stop())
+    }
+
+    @Test fun aDropInPlaceDuringAPendingSaveKeepsShowingTheFirstDrop() {
+        val order = DragOrder(listOf(1, 2, 3), mine = true)
+        order.start(); order.move(1, 3)
+        order.stop()
+        order.start()
+        assertNull(order.stop())
+        assertEquals(listOf(2L, 3L, 1L), order.ids)
+    }
+
+    @Test fun aDropInPlaceWhileASaveIsPendingStillShowsRowsThatCame() {
+        val order = DragOrder(listOf(1, 2, 3), mine = true)
+        order.start(); order.move(1, 3)
+        order.stop()
+        order.start()
+        order.sync(listOf(1, 2, 3, 4), mine = true)
+        assertNull(order.stop())
+        assertEquals(listOf(2L, 3L, 1L, 4L), order.ids)
+    }
+
+    @Test fun aDropInPlaceAfterTheStoredOrderChangedShowsTheStoredOrder() {
+        val order = DragOrder(listOf(1, 2, 3), mine = true)
+        order.start()
+        order.sync(listOf(3, 2, 1), mine = true)
+        assertNull(order.stop())
+        assertEquals(listOf(3L, 2L, 1L), order.ids)
     }
 }

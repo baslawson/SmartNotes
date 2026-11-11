@@ -25,6 +25,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Delete
@@ -216,19 +217,27 @@ private fun Header(text: String) {
 fun TasksScreen(vm: TodoViewModel, onOpen: (Long) -> Unit, onBack: () -> Unit, bottomBar: @Composable () -> Unit) {
     val state by vm.state.collectAsStateWithLifecycle()
     val selection = vm.selection
-    LaunchedEffect(state.todos) { if (state.loaded) selection.keepOnly(state.todos.map { it.id }) }
     val sort by vm.sort.collectAsStateWithLifecycle()
-    val canArrange = sort == TaskSort.MINE && !selection.active
+    val showDone by vm.showDone.collectAsStateWithLifecycle()
+    // Only rows on screen can be selected (Select all leaves hidden done tasks alone).
+    val shownIds = state.todos.filter { showDone || !it.done }.map { it.id }
+    LaunchedEffect(shownIds) { if (state.loaded) selection.keepOnly(shownIds) }
+    // Handles in every order; a drop switches to My order.
+    val canArrange = !selection.active
 
     Scaffold(
         topBar = {
             if (selection.active) {
-                SelectionBar(selection, state.todos.map { it.id }) {
+                SelectionBar(selection, shownIds) {
                     IconButton(onClick = vm::deleteSelected) { Icon(Icons.Default.Delete, contentDescription = "Delete") }
                 }
             } else TopAppBar(
                 title = { Text("Tasks") }, navigationIcon = { BackButton(onBack) },
-                actions = { SortButton(SortGroup(null, TaskSort.entries, sort, { it.label }, vm::setSort)) },
+                actions = {
+                    SortButton(SortGroup(null, TaskSort.entries, sort, { it.label }, vm::setSort)) { close ->
+                        ShowCompletedItem(showDone) { close(); vm.toggleShowDone() }
+                    }
+                },
             )
         },
         bottomBar = bottomBar,
@@ -251,7 +260,7 @@ fun TasksScreen(vm: TodoViewModel, onOpen: (Long) -> Unit, onBack: () -> Unit, b
             val done = state.todos.filter { it.done }.sortedByDescending { it.doneAt }
             val list = rememberLastScroll("tasks")
             val byId = open.associateBy { it.id }
-            val order = rememberDragOrder(open.map { it.id })
+            val order = rememberDragOrder(open.map { it.id }, sort == TaskSort.MINE)
             val reorder = rememberReorderableLazyListState(list) { from, to ->
                 val a = (from.key as? String)?.removePrefix("t:")?.toLongOrNull()
                 val b = (to.key as? String)?.removePrefix("t:")?.toLongOrNull()
@@ -263,20 +272,20 @@ fun TasksScreen(vm: TodoViewModel, onOpen: (Long) -> Unit, onBack: () -> Unit, b
                         Surface(shadowElevation = if (dragging) 6.dp else 0.dp) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 TodoLine(t, onCheck = { vm.setDone(t, it) }, Modifier.weight(1f).selectable(selection, t.id) { onOpen(t.id) })
-                                if (canArrange) DragHandleIcon(t.title, Modifier.draggableHandle(onDragStarted = { order.start() }, onDragStopped = { vm.arrange(order.stop()) }).padding(12.dp))
+                                if (canArrange) DragHandleIcon(t.title, Modifier.draggableHandle(onDragStarted = { order.start() }, onDragStopped = { order.stop()?.let(vm::arrange) }).padding(12.dp))
                             }
                         }
                     }
                 }
                 if (done.isNotEmpty()) {
                     item(key = "h:done") {
-                        Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text("Done (${done.size})", Modifier.weight(1f), style = MaterialTheme.typography.titleSmall,
-                                color = MaterialTheme.colorScheme.primary)
+                        CompletedHeader("Done (${done.size})", showDone, vm::toggleShowDone) {
                             if (!selection.active) TextButton(onClick = { vm.clearDone() }) { Text("Clear done") }
                         }
                     }
-                    items(done, key = { "t:${it.id}" }) { t -> TodoLine(t, onCheck = { vm.setDone(t, it) }, Modifier.selectable(selection, t.id) { onOpen(t.id) }) }
+                    if (showDone) items(done, key = { "t:${it.id}" }) { t ->
+                        TodoLine(t, onCheck = { vm.setDone(t, it) }, Modifier.selectable(selection, t.id) { onOpen(t.id) })
+                    }
                 }
             }
         }
@@ -469,6 +478,7 @@ fun ShoppingScreen(vm: ShoppingViewModel, setting: ReminderSound, onBack: () -> 
     val itemSort by vm.itemSort.collectAsStateWithLifecycle()
     val listSort by vm.listSort.collectAsStateWithLifecycle()
     var arrangeLists by rememberSaveable { mutableStateOf(false) }
+    val showTicked by vm.showTicked.collectAsStateWithLifecycle()
     val open = Sorting.items(state.items.filter { !it.checked }, itemSort)
     val checked = state.items.filter { it.checked }
     val selection = vm.selection
@@ -488,9 +498,10 @@ fun ShoppingScreen(vm: ShoppingViewModel, setting: ReminderSound, onBack: () -> 
                     SortButton(
                         SortGroup("Items", ItemSort.entries, itemSort, { it.label }, vm::setItemSort),
                         SortGroup("Lists", ListSort.entries, listSort, { it.label }, vm::setListSort),
-                        extra = if (listSort == ListSort.MINE) { close ->
+                        extra = { close ->
+                            ShowCompletedItem(showTicked) { close(); vm.toggleShowTicked() }
                             DropdownMenuItem(text = { Text("Arrange lists…") }, onClick = { close(); arrangeLists = true })
-                        } else null,
+                        },
                     )
                     if (list != null && list.id != 1L) IconButton(onClick = { editingId = list.id }) { Icon(Icons.Default.Edit, contentDescription = "List date and reminder") }
                 },
@@ -548,9 +559,9 @@ fun ShoppingScreen(vm: ShoppingViewModel, setting: ReminderSound, onBack: () -> 
                 return@Column
             }
             val scroll = rememberLastScroll("shopping:$listId")
-            val canArrange = itemSort == ItemSort.MINE && !selection.active
+            val canArrange = !selection.active
             val byId = open.associateBy { it.id }
-            val order = key(listId) { rememberDragOrder(open.map { it.id }) }
+            val order = key(listId) { rememberDragOrder(open.map { it.id }, itemSort == ItemSort.MINE) }
             val reorder = rememberReorderableLazyListState(scroll) { from, to ->
                 val a = from.key as? Long
                 val b = to.key as? Long
@@ -562,15 +573,17 @@ fun ShoppingScreen(vm: ShoppingViewModel, setting: ReminderSound, onBack: () -> 
                     ReorderableItem(reorder, key = item.id, enabled = canArrange) { dragging ->
                         Surface(shadowElevation = if (dragging) 6.dp else 0.dp) {
                             ItemLine(item, onCheck = { vm.setChecked(item, it) }, onDelete = { vm.delete(item) }) {
-                                if (canArrange) DragHandleIcon(item.name, Modifier.draggableHandle(onDragStarted = { order.start() }, onDragStopped = { vm.arrangeItems(order.stop()) }).padding(12.dp))
+                                if (canArrange) DragHandleIcon(item.name, Modifier.draggableHandle(onDragStarted = { order.start() }, onDragStopped = { order.stop()?.let(vm::arrangeItems) }).padding(12.dp))
                             }
                         }
                     }
                 }
                 if (checked.isNotEmpty()) {
-                    item { HorizontalDivider(Modifier.padding(top = 8.dp)) }
-                    item { Header("In the basket") }
-                    items(checked, key = { it.id }) { item ->
+                    item(key = "h:basket") {
+                        HorizontalDivider(Modifier.padding(top = 8.dp))
+                        CompletedHeader("In the basket (${checked.size})", showTicked, vm::toggleShowTicked)
+                    }
+                    if (showTicked) items(checked, key = { it.id }) { item ->
                         ItemLine(item, onCheck = { vm.setChecked(item, it) }, onDelete = { vm.delete(item) })
                     }
                 }
@@ -584,7 +597,7 @@ fun ShoppingScreen(vm: ShoppingViewModel, setting: ReminderSound, onBack: () -> 
         )
     }
     if (arrangeLists) ArrangeListsDialog(
-        Sorting.lists(state.lists, ListSort.MINE, LocalDate.now()), { it.label(style) }, vm::arrangeLists,
+        Sorting.lists(state.lists, listSort, LocalDate.now()), listSort == ListSort.MINE, { it.label(style) }, vm::arrangeLists,
     ) { arrangeLists = false }
     if (pickNew) DatePickDialog(null, onPick = { vm.openDate(it) }, onDismiss = { pickNew = false })
     if (vm.dateTaken) {
@@ -663,7 +676,8 @@ private fun ShoppingListDialog(
 
 @Composable
 private fun ItemLine(item: ShoppingItem, onCheck: (Boolean) -> Unit, onDelete: () -> Unit, handle: @Composable () -> Unit = {}) {
-    Row(Modifier.fillMaxWidth().clickable { onCheck(!item.checked) }, verticalAlignment = Alignment.CenterVertically) {
+    // Only the box ticks: a tap on the name does nothing (no ticking by accident while scrolling or dragging).
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Checkbox(checked = item.checked, onCheckedChange = onCheck)
         Text(
             item.name,
@@ -683,12 +697,13 @@ private fun ItemLine(item: ShoppingItem, onCheck: (Boolean) -> Unit, onDelete: (
 @Composable
 private fun ArrangeListsDialog(
     lists: List<ShoppingList>,
+    mine: Boolean,
     label: (ShoppingList) -> String,
     onArrange: (List<Long>) -> Unit,
     onDismiss: () -> Unit,
 ) {
     val byId = lists.associateBy { it.id }
-    val order = rememberDragOrder(lists.map { it.id })
+    val order = rememberDragOrder(lists.map { it.id }, mine)
     val list = rememberLazyListState()
     val reorder = rememberReorderableLazyListState(list) { from, to ->
         val a = from.key as? Long
@@ -705,7 +720,7 @@ private fun ArrangeListsDialog(
                         Surface(shadowElevation = if (dragging) 6.dp else 0.dp) {
                             Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Text(label(l), Modifier.weight(1f))
-                                DragHandleIcon(label(l), Modifier.draggableHandle(onDragStarted = { order.start() }, onDragStopped = { onArrange(order.stop()) }).padding(8.dp))
+                                DragHandleIcon(label(l), Modifier.draggableHandle(onDragStarted = { order.start() }, onDragStopped = { order.stop()?.let(onArrange) }).padding(8.dp))
                             }
                         }
                     }
@@ -713,5 +728,25 @@ private fun ArrangeListsDialog(
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } },
+    )
+}
+
+/** "Done (3)  Show" / "Hide": the line over completed rows, which are hidden to start with. [extra]: Clear done, say. */
+@Composable
+private fun CompletedHeader(title: String, shown: Boolean, onToggle: () -> Unit, extra: @Composable () -> Unit = {}) {
+    Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(title, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+        TextButton(onClick = onToggle) { Text(if (shown) "Hide" else "Show") }
+        extra()
+    }
+}
+
+/** The sort menu's "Show completed" switch (ticked when they show). */
+@Composable
+private fun ShowCompletedItem(shown: Boolean, onClick: () -> Unit) {
+    HorizontalDivider()
+    DropdownMenuItem(
+        text = { Text("Show completed") }, onClick = onClick,
+        trailingIcon = { if (shown) Icon(Icons.Default.Check, contentDescription = "On") },
     )
 }

@@ -80,24 +80,35 @@ fun DragHandleIcon(name: String, modifier: Modifier = Modifier) {
 }
 
 /**
- * The order of rows being dragged ("My order"). It shows the stored order ([sync]), except from the start of a drag until
- * the stored order next changes (the drop saved): then the order as dragged. One holder for the screen's life, so the
- * drop always reads the latest order (the drag library keeps the first stop handler it was given).
+ * The order of rows being dragged. It shows the stored order ([sync]), except from the start of a drag until the stored
+ * order matches the drop: then the order as dragged. A drop in another sort switches to My order, and the screen may
+ * first see My order with the old places (the save not back yet); the dragged order stays shown through that, so the
+ * rows don't jump. One holder for the screen's life, so the drop always reads the latest order (the drag library keeps
+ * the first stop handler it was given).
  */
 @Stable
-class DragOrder(initial: List<Long>) {
+class DragOrder(initial: List<Long>, private var mine: Boolean = false) {
     private var stored by mutableStateOf(initial)
     private var dragged by mutableStateOf<List<Long>?>(null)
     private var dragging = false
+    /** What was on screen when this drag started: a drop back there changes nothing. */
+    private var before: List<Long> = initial
+    /** This drag started over an earlier drop not saved yet. */
+    private var pending = false
 
     /** The ids in the order to show. */
     val ids: List<Long> get() = dragged ?: stored
 
-    /** The stored order changed (from the database). */
-    fun sync(order: List<Long>) {
-        if (order == stored) return
+    /** The stored order (from the database) and whether the section is in My order. */
+    fun sync(order: List<Long>, mine: Boolean) {
+        val sortChanged = mine != this.mine
+        this.mine = mine
+        if (order == stored && !sortChanged) return
         stored = order
-        if (!dragging) dragged = null
+        if (dragging) return
+        val d = dragged ?: return
+        // Done waiting: the drop is stored; rows came or went; or another order was chosen.
+        if (order == d || order.toSet() != d.toSet() || (sortChanged && !mine)) dragged = null
     }
 
     /** The dragged order with rows added meanwhile put in at their stored place, and rows gone left out. */
@@ -109,23 +120,38 @@ class DragOrder(initial: List<Long>) {
         return result
     }
 
-    fun start() { dragging = true; if (dragged == null) dragged = stored }
+    fun start() {
+        dragging = true
+        pending = dragged != null
+        if (dragged == null) dragged = stored
+        before = dragged ?: stored
+    }
     /** [moved] goes where [target] is (both must be in the order). */
     fun move(moved: Long, target: Long) { dragged = Sorting.move(ids, moved, target) }
-    /** The drop: the order to save (no row hidden: one added during the drag is in it). */
-    fun stop(): List<Long> {
+
+    /**
+     * The drop: the order to save (with any row added during the drag), or null when nothing moved, so a drop in place
+     * neither saves nor changes the sort.
+     */
+    fun stop(): List<Long>? {
         dragging = false
         val result = dragged?.let(::reconciled) ?: stored
-        // Already the stored order: nothing will come back from the database to clear the override, so clear it now.
-        dragged = if (result == stored) null else result
+        // Nothing moved since the drag started (compared with what was on screen then, which may be an earlier drop
+        // not saved yet: a drag that puts that back to the old order is a move to save).
+        if (result == reconciled(before)) {
+            // Still waiting for the earlier drop's save: keep showing it (with any rows that came meanwhile).
+            dragged = if (!pending || result == stored) null else result
+            return null
+        }
+        dragged = result
         return result
     }
 }
 
-/** A [DragOrder] kept in step with [stored] (the order from the database). */
+/** A [DragOrder] kept in step with [stored] (the order from the database) and [mine] (the section is in My order). */
 @Composable
-fun rememberDragOrder(stored: List<Long>): DragOrder {
-    val order = remember { DragOrder(stored) }
-    SideEffect { order.sync(stored) }
+fun rememberDragOrder(stored: List<Long>, mine: Boolean): DragOrder {
+    val order = remember { DragOrder(stored, mine) }
+    SideEffect { order.sync(stored, mine) }
     return order
 }

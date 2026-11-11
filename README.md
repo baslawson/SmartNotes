@@ -20,7 +20,7 @@ Also: full-text search (Room FTS4, word prefixes, matches highlighted), related 
 ## Tasks
 
 One anytime checklist, not linked to notes. Open tasks first (high priority first, marked "!"; low greyed; newest first
-within a priority), ticked ones below under *Done* (can be cleared). Tap a task for its details, priority and its own
+within a priority), ticked ones below under *Done* (hidden until shown; can be cleared). Tap a task for its details, priority and its own
 reminder: a date and time, its sound, and a repeat (every day / week / month / N days; monthly keeps its day, Jan 31 →
 Feb 28 → Mar 31). Ticking a repeating task moves its reminder to the next time instead.
 
@@ -54,10 +54,17 @@ The sort button (three lines) on Notes, Tasks and Shopping picks the order, reme
 | Shopping items | Added, A–Z, My order | ticked items stay below |
 | Shopping lists | By date (Anytime, today and coming days, then past ones), My order | — |
 
-In *My order* each row has a handle (≡): drag it to move the row (pinned notes among the pinned). The first time My
-order is chosen, the order then on screen is where it starts. New notes and tasks go on top, new items and lists at the
-end. Notes can't be dragged while searching or filtering by a tag. Lists are arranged in Shopping → sort → *Arrange
-lists…* (dragging a chip itself would clash with scrolling the row and long-press selecting).
+Each row has a handle (≡): drag it to move the row (pinned notes among the pinned). Dropping it makes the order you
+see, with that move, *My order*, and the sort switches to it. Choosing My order from the menu the first time starts
+from the order then on screen. New notes and tasks go on top, new items and lists at the end. Notes can't be dragged
+while searching or filtering by a tag, and done tasks and ticked items stay below. Lists are arranged in Shopping →
+sort → *Arrange lists…* (dragging a chip itself would clash with scrolling the row and long-press selecting).
+
+Ticking is only on the box itself: a tap on a shopping item's name, or a note's checklist line, does nothing.
+
+Completed rows are hidden to start with: done tasks fold into a *Done (3)* line and ticked shopping items into *In the
+basket (3)*; *Show* / *Hide* on that line (or *Show completed* in the sort menu) switches them, remembered for Tasks
+and for Shopping. *Clear done* and *Clear ticked* work either way.
 
 ## Selecting, deleting and the recycle bin
 

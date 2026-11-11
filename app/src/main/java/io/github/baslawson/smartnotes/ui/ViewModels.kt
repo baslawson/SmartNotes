@@ -52,6 +52,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -111,10 +112,11 @@ class NotesViewModel(
         settings.setNoteSort(new)
     }
 
-    /** A drag ended: [ids] are all the notes in their new order. */
+    /** A drag ended (in any order): [ids] are all the notes in their new order, which becomes My order. */
     fun arrange(ids: List<Long>) {
         settings.setArranged(ARRANGED)
-        appScope.launch { repo.arrange(ids) }
+        // My order once the places are saved (so the list doesn't show the old places for a moment).
+        appScope.launch { repo.arrange(ids); settings.setNoteSort(NoteSort.MINE) }
     }
 
     val selection = Selection()
@@ -420,6 +422,9 @@ class TodoViewModel(
 ) : ViewModel() {
     val selection = Selection()
     val sort: StateFlow<TaskSort> = settings.taskSort
+    /** Done tasks shown below the open ones (hidden to start with). */
+    val showDone: StateFlow<Boolean> = settings.showDoneTasks
+    fun toggleShowDone() = settings.setShowDoneTasks(!showDone.value)
 
     /** The sort button. The first time "My order" is chosen, the open tasks' order then becomes its start. */
     fun setSort(new: TaskSort) {
@@ -431,10 +436,10 @@ class TodoViewModel(
         settings.setTaskSort(new)
     }
 
-    /** A drag ended: [ids] are the open tasks in their new order. */
+    /** A drag ended (in any order): [ids] are the open tasks in their new order, which becomes My order. */
     fun arrange(ids: List<Long>) {
         settings.setArranged("tasks")
-        appScope.launch { repo.arrange(ids) }
+        appScope.launch { repo.arrange(ids); settings.setTaskSort(TaskSort.MINE) }
     }
 
     fun deleteSelected() {
@@ -590,16 +595,53 @@ class ShoppingViewModel(
 ) : ViewModel() {
     val itemSort: StateFlow<ItemSort> = settings.itemSort
     val listSort: StateFlow<ListSort> = settings.listSort
+    /** Ticked items shown ("In the basket"; hidden to start with). */
+    val showTicked: StateFlow<Boolean> = settings.showTickedItems
+    fun toggleShowTicked() = settings.setShowTickedItems(!showTicked.value)
 
-    /** The items' sort button. The first time "My order" is chosen for a list, its items' order then becomes its start. */
-    fun setItemSort(new: ItemSort) {
-        val old = itemSort.value
-        val list = listId.value
-        if (new == ItemSort.MINE && list > 0 && !settings.arranged("items:$list")) {
-            settings.setArranged("items:$list")
-            appScope.launch { repo.arrangeItemsFrom(list) { open -> Sorting.items(open, old) } }
+    /**
+     * Item order changes (choosing a sort, setting up My order, saving a drag) run one after another, in the order
+     * they were made: a drag is never overwritten by setup, and a later choice is never undone by an earlier one.
+     */
+    private val orderJobs = Channel<suspend () -> Unit>(Channel.UNLIMITED)
+
+    init {
+        appScope.launch {
+            for (job in orderJobs) runCatching { job() }.onFailure { AppLog.w("Shopping", "Item order change failed", it) }
         }
-        settings.setItemSort(new)
+    }
+
+    override fun onCleared() {
+        // The jobs already queued still run (the loop ends once they are done).
+        orderJobs.close()
+    }
+
+    /**
+     * The items' sort button. My order starts from the order each list showed: lists never arranged get it first
+     * (see [toSeed]), then the sort switches.
+     */
+    fun setItemSort(new: ItemSort) {
+        // Read when the job runs: choices made meanwhile (queued before it) count, so the last one wins.
+        orderJobs.trySend {
+            val old = itemSort.value
+            if (new != old) {
+                if (new == ItemSort.MINE) seed(toSeed(except = 0), old)
+                settings.setItemSort(new)
+            }
+        }
+    }
+
+    /** The lists (but [except]) not arranged before; from now on they count as arranged. */
+    private fun toSeed(except: Long): List<Long> {
+        val ids = state.value.lists.map { it.id }.filter { it != except && !settings.arranged("items:$it") }
+        ids.forEach { settings.setArranged("items:$it") }
+        return ids
+    }
+
+    /** Each of [lists] gets the order its items showed in [old], so every list looks as it did a moment ago. */
+    private suspend fun seed(lists: List<Long>, old: ItemSort) {
+        if (old == ItemSort.MINE) return
+        lists.forEach { id -> repo.arrangeItemsFrom(id) { open -> Sorting.items(open, old) } }
     }
 
     /** The lists' sort button; "My order" starts from the date order. */
@@ -611,16 +653,23 @@ class ShoppingViewModel(
         settings.setListSort(new)
     }
 
-    /** A drag ended: the open items of the list shown, in their new order (that list counts as arranged from now on). */
+    /** A drag ended (in any order): the open items of the list shown, in their new order, which becomes My order. */
     fun arrangeItems(ids: List<Long>) {
-        listId.value.takeIf { it > 0 }?.let { settings.setArranged("items:$it") }
-        appScope.launch { repo.arrangeItems(ids) }
+        // The item order is one setting for every list: the others keep the order they showed (set up once).
+        val old = itemSort.value
+        val list = listId.value
+        orderJobs.trySend {
+            if (old != ItemSort.MINE) seed(toSeed(except = list), old)
+            if (list > 0) settings.setArranged("items:$list")
+            repo.arrangeItems(ids)
+            settings.setItemSort(ItemSort.MINE)
+        }
     }
 
-    /** Arrange lists: every list in its new order. */
+    /** Arrange lists: every list in its new order, which becomes My order. */
     fun arrangeLists(ids: List<Long>) {
         settings.setArranged("lists")
-        appScope.launch { repo.arrangeLists(ids) }
+        appScope.launch { repo.arrangeLists(ids); settings.setListSort(ListSort.MINE) }
     }
 
     /** The list shown: the one asked for (a reminder), else the last one looked at; 0 = none yet (today's opens). */
