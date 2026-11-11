@@ -38,4 +38,15 @@ class ShoppingTest {
         assertEquals("2x milk", Shopping.editText("milk", "2x"))
         assertEquals("milk", Shopping.editText("milk", ""))
     }
+
+    @Test fun matchInFindsTypedLettersInTheNameItself() {
+        assertEquals(4..5, Shopping.matchIn("Oat milk", "MI"))
+        assertEquals(0..2, Shopping.matchIn("Milk", "mil"))
+        assertEquals(null, Shopping.matchIn("Milk", "x"))
+        assertEquals(null, Shopping.matchIn("Milk", ""))
+        assertEquals(null, Shopping.matchIn("Mi", "milk"))
+        // "İ" lowercases to two characters: positions must still fit the name (this used to crash).
+        assertEquals(1..4, Shopping.matchIn("İncir", "ncir"))
+        assertEquals(null, Shopping.matchIn("İncir", "i̇ncir"))
+    }
 }

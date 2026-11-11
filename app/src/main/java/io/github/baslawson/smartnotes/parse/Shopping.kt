@@ -30,6 +30,16 @@ object Shopping {
         return listOf("$quantity $name", "$name $quantity").firstOrNull { parse(it) == wanted } ?: "$quantity $name"
     }
 
+    /**
+     * Where [typed] appears in [name], ignoring case, as positions in [name] itself (null when it doesn't, or nothing is
+     * typed). Compared letter by letter, so letters whose lowercase is longer (İ) can't shift the positions.
+     */
+    fun matchIn(name: String, typed: String): IntRange? {
+        if (typed.isEmpty()) return null
+        val at = (0..name.length - typed.length).firstOrNull { name.regionMatches(it, typed, 0, typed.length, ignoreCase = true) }
+        return at?.let { it until it + typed.length }
+    }
+
     /** The key that makes "Milk" and "milk " the same item. */
     fun key(name: String): String = name.trim().lowercase()
 

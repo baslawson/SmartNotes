@@ -29,12 +29,13 @@ Feb 28 → Mar 31). Ticking a repeating task moves its reminder to the next time
 Lists are dates: *+ New date* asks for a day and opens that day's list (one per day). *Anytime* is the undated list
 and can't be deleted. A dated list's ✎ changes its date or sets a reminder on that day (with its sound), or deletes it.
 Dates show as Today / Tomorrow or in Settings → Date format; the top bar shows the open list's day and full
-date. Type `2x milk`, `milk 2L` or `eggs x12`: the quantity shows apart from the name. Tap an item's name to rename it or change its quantity (suggestions follow the new name); a name already on that list isn't taken twice. Past items are suggested while
-typing (✕ forgets one), and an item already on the list isn't added twice. The reminder lists what is still to buy.
+date. Type `2x milk`, `milk 2L` or `eggs x12`: the quantity shows apart from the name. Tap an item's name to rename it or change its quantity (suggestions follow the new name); a name already on that list isn't taken twice. Past items pop up under the
+box while typing, the typed letters in bold (tap one to add it, ✕ forgets it), and an item already on the list isn't added twice. The reminder lists what is still to buy.
 Shopping opens on the list you looked at last; the first time, or if that list is gone, on today's (made if needed).
-The chips run Anytime, Today, then the days to come, and the row scrolls to the list shown. Lists whose day has gone
+The chips run Anytime, Today, Tomorrow (those three always first, in that order), then the days to come, and the
+row scrolls to the list shown. Lists whose day has gone
 are under the *Past (n)* chip: it lists them newest first with what each still has to buy, and a tap opens one (its
-chip shows while it is open). The 🔍 in the top bar searches the items of every list in use, past ones too (not the
+chip shows while it is open). The 🔍 at the right of the add box searches (for what is typed, if anything) the items of every list in use, past ones too (not the
 recycle bin); results are grouped by list, ticked ones marked, and a tap opens that list. What a past list still has to buy carries over to today's list (made if needed) when Shopping is opened, at
 midnight while it is open, and just before today's list reminds you; an item today's list already has isn't added
 twice. A past list with nothing left to buy (empty or all ticked) goes to the recycle bin by itself when Shopping is
@@ -65,7 +66,7 @@ The sort button (three lines) on Notes, Tasks and Shopping picks the order, reme
 | Notes | Last edited, Created, Title A–Z, My order | pinned notes stay on top |
 | Tasks | Priority, Due date (a date without a time counts as 9:00), Newest, A–Z, My order | done tasks stay below |
 | Shopping items | Added, A–Z, My order | ticked items stay below |
-| Shopping lists | By date (Anytime, today, then coming days), My order | past lists are under *Past*, newest first |
+| Shopping lists | By date, My order | Anytime, Today and Tomorrow always first; past lists are under *Past*, newest first |
 
 Each row has a handle (≡): drag it to move the row (pinned notes among the pinned). Dropping it makes the order you
 see, with that move, *My order*, and the sort switches to it. Choosing My order from the menu the first time starts

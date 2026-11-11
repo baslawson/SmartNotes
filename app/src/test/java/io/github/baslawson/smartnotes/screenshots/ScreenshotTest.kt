@@ -8,6 +8,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextInput
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.github.takahirom.roborazzi.captureRoboImage
@@ -75,6 +76,9 @@ class ScreenshotTest {
     @Test fun light() {
         seed()
         tour("light")
+        // Typing pops up past items under the box.
+        compose.onNodeWithText("Add item, e.g. 2x milk").performTextInput("ba")
+        shot("light-5-suggestions", "batteries")
     }
 
     @Test fun dark() {

@@ -43,7 +43,6 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.InputChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -58,6 +57,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.activity.compose.BackHandler
 import io.github.baslawson.smartnotes.data.isPast
 import io.github.baslawson.smartnotes.data.nextDue
@@ -113,6 +113,15 @@ import io.github.baslawson.smartnotes.reminders.Repeat
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.window.PopupProperties
+import androidx.compose.runtime.mutableIntStateOf
+import io.github.baslawson.smartnotes.parse.PastItem
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import io.github.baslawson.smartnotes.parse.Shopping
@@ -662,7 +671,6 @@ fun ShoppingScreen(vm: ShoppingViewModel, setting: ReminderSound, onBack: () -> 
                 title = { Text(list?.title(style) ?: "Shopping", maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 navigationIcon = { BackButton(onBack) },
                 actions = {
-                    IconButton(onClick = { vm.searchQuery.value = "" }) { Icon(Icons.Default.Search, contentDescription = "Search all lists") }
                     SortButton(
                         SortGroup("Items", ItemSort.entries, itemSort, { it.label }, vm::setItemSort),
                         SortGroup("Lists", ListSort.entries, listSort, { it.label }, vm::setListSort),
@@ -703,10 +711,15 @@ fun ShoppingScreen(vm: ShoppingViewModel, setting: ReminderSound, onBack: () -> 
                     )
                 }
             }
+            // Suggestions pop up right under the box while typing (the box keeps the keyboard).
+            val suggestions = vm.suggestions(state)
+            var fieldWidth by remember { mutableIntStateOf(0) }
+            var focused by remember { mutableStateOf(false) }
+            Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
             TextField(
                 value = vm.input,
                 onValueChange = { vm.input = it },
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                modifier = Modifier.fillMaxWidth().onSizeChanged { fieldWidth = it.width }.onFocusChanged { focused = it.isFocused },
                 shape = PillShape, colors = pillColors(),
                 leadingIcon = { Icon(Icons.Default.Add, contentDescription = null) },
                 placeholder = { Text("Add item, e.g. 2x milk") },
@@ -714,26 +727,17 @@ fun ShoppingScreen(vm: ShoppingViewModel, setting: ReminderSound, onBack: () -> 
                 keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Done),
                 // Done adds the item and keeps the keyboard open for the next one.
                 keyboardActions = KeyboardActions(onDone = { vm.add() }),
+                // On the right: add what is typed, and search all lists (for what is typed, if anything).
                 trailingIcon = {
-                    if (vm.input.isNotBlank()) IconButton(onClick = { vm.add() }) { Icon(Icons.Default.Add, contentDescription = "Add") }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (vm.input.isNotBlank()) IconButton(onClick = { vm.add() }) { Icon(Icons.Default.Check, contentDescription = "Add") }
+                        IconButton(onClick = { vm.searchQuery.value = Shopping.parse(vm.input)?.name.orEmpty() }) { Icon(Icons.Default.Search, contentDescription = "Search all lists") }
+                    }
                 },
             )
-            ProgressLine(checked.size, state.items.size, "bought", Modifier.padding(horizontal = 20.dp, vertical = 6.dp))
-            val suggestions = vm.suggestions(state)
-            if (suggestions.isNotEmpty()) {
-                LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(suggestions, key = { it.name }) { s ->
-                        InputChip(
-                            selected = false,
-                            onClick = { vm.pick(s) },
-                            label = { Text(s.name) },
-                            trailingIcon = {
-                                Icon(Icons.Default.Clear, contentDescription = "Forget ${s.name}", Modifier.size(18.dp).clickable { vm.forget(s) })
-                            },
-                        )
-                    }
-                }
+            SuggestionsPopup(if (focused) suggestions else emptyList(), vm.input, fieldWidth, onPick = vm::pick, onForget = { vm.forget(it) })
             }
+            ProgressLine(checked.size, state.items.size, "bought", Modifier.padding(horizontal = 20.dp, vertical = 6.dp))
             if (state.loaded && state.items.isEmpty()) {
                 EmptyState(Icons.Default.ShoppingCart, "Nothing on this list yet", "Type an item above, like 2x milk.\nTap ✎ to give the list a date and a reminder.")
                 return@Column
@@ -906,6 +910,50 @@ private fun ItemLine(
     }
 }
 
+/**
+ * Past items matching what is typed, in a small menu under the add box ([width] px wide): tap one to add it, ✕ to
+ * forget it. It doesn't take the keyboard; tapping elsewhere hides it until the text changes.
+ */
+@Composable
+private fun SuggestionsPopup(
+    suggestions: List<PastItem>,
+    input: String,
+    width: Int,
+    onPick: (PastItem) -> Unit,
+    onForget: (PastItem) -> Unit,
+) {
+    // Hidden by a tap elsewhere until the text changes.
+    var dismissed by remember(input) { mutableStateOf(false) }
+    val typed = Shopping.parse(input)?.name.orEmpty()
+    DropdownMenu(
+        expanded = suggestions.isNotEmpty() && !dismissed,
+        onDismissRequest = { dismissed = true },
+        properties = PopupProperties(focusable = false),
+        modifier = Modifier.width(with(LocalDensity.current) { width.toDp() }),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
+        shape = MaterialTheme.shapes.medium,
+    ) {
+        suggestions.forEach { s ->
+            DropdownMenuItem(
+                text = { Text(boldMatch(s.name, typed)) },
+                onClick = { onPick(s) },
+                trailingIcon = {
+                    IconButton(onClick = { onForget(s) }) { Icon(Icons.Default.Clear, contentDescription = "Forget ${s.name}", Modifier.size(18.dp)) }
+                },
+            )
+        }
+    }
+}
+
+/** [name] with the part matching [typed] in bold ("mi" in "Oat milk"). */
+private fun boldMatch(name: String, typed: String): AnnotatedString = buildAnnotatedString {
+    val match = Shopping.matchIn(name, typed)
+    if (match == null) { append(name); return@buildAnnotatedString }
+    append(name.substring(0, match.first))
+    withStyle(SpanStyle(fontWeight = FontWeight.ExtraBold)) { append(name.substring(match)) }
+    append(name.substring(match.last + 1))
+}
+
 /** Rename an item: its name and quantity as typed ("2x oat milk"); [others] are the keys of the list's other items. */
 @Composable
 private fun EditItemDialog(item: ShoppingItem, others: Set<String>, onSave: (String) -> Unit, onDismiss: () -> Unit) {
@@ -942,12 +990,15 @@ private fun EditItemDialog(item: ShoppingItem, others: Set<String>, onSave: (Str
 /** Shopping → sort → Arrange lists…: the lists in "My order", dragged by their handles; each drop is saved. */
 @Composable
 private fun ArrangeListsDialog(
-    lists: List<ShoppingList>,
+    all: List<ShoppingList>,
     mine: Boolean,
     label: (ShoppingList) -> String,
     onArrange: (List<Long>) -> Unit,
     onDismiss: () -> Unit,
 ) {
+    // Anytime, Today and Tomorrow stay first (shown without handles); the later days can be dragged.
+    val today = rememberToday()
+    val (fixed, lists) = all.partition { Sorting.pinned(it, today) }
     val byId = lists.associateBy { it.id }
     val order = rememberDragOrder(lists.map { it.id }, mine)
     val list = rememberLazyListState()
@@ -961,12 +1012,18 @@ private fun ArrangeListsDialog(
         title = { Text("Arrange lists") },
         text = {
             LazyColumn(Modifier.heightIn(max = 420.dp), list) {
+                items(fixed, key = { "fixed:${it.id}" }) { l ->
+                    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp).heightIn(min = 40.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(label(l), Modifier.weight(1f))
+                        Text("Always first", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(end = 8.dp))
+                    }
+                }
                 items(order.ids.mapNotNull { byId[it] }, key = { it.id }) { l ->
                     ReorderableItem(reorder, key = l.id) { dragging ->
                         Surface(shadowElevation = if (dragging) 6.dp else 0.dp) {
                             Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Text(label(l), Modifier.weight(1f))
-                                DragHandleIcon(label(l), Modifier.draggableHandle(onDragStarted = { order.start() }, onDragStopped = { order.stop()?.let(onArrange) }).padding(8.dp))
+                                DragHandleIcon(label(l), Modifier.draggableHandle(onDragStarted = { order.start() }, onDragStopped = { order.stop()?.let { onArrange(fixed.map { f -> f.id } + it) } }).padding(8.dp))
                             }
                         }
                     }

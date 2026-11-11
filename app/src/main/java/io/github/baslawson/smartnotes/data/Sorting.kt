@@ -61,9 +61,21 @@ object Sorting {
     /** The date chips: by date (see [orderLists]) or in "My order" (ties in date order). */
     fun lists(lists: List<ShoppingList>, sort: ListSort, today: LocalDate): List<ShoppingList> {
         val byDate = orderLists(lists, today)
-        if (sort == ListSort.DATE) return byDate
-        val rank = byDate.withIndex().associate { (i, l) -> l.id to i }
-        return byDate.sortedWith(compareBy<ShoppingList> { it.position }.thenBy { rank.getValue(it.id) })
+        // Anytime, Today and Tomorrow always come first, in that order, whatever the sort.
+        val (pinned, rest) = byDate.partition { pinned(it, today) }
+        if (sort == ListSort.DATE) return pinned + rest
+        val rank = rest.withIndex().associate { (i, l) -> l.id to i }
+        return pinned + rest.sortedWith(compareBy<ShoppingList> { it.position }.thenBy { rank.getValue(it.id) })
+    }
+
+    /**
+     * Anytime, Today and Tomorrow: always first, never arranged. Other lists without a date (one restored from the bin
+     * when its day had a list by then) are arranged like the rest.
+     */
+    fun pinned(list: ShoppingList, today: LocalDate): Boolean {
+        if (list.id == 1L) return true
+        val day = list.date?.let { runCatching { LocalDate.parse(it) }.getOrNull() } ?: return false
+        return day == today || day == today.plusDays(1)
     }
 
     /** [ids] with [moved] put where [target] is (a drag ended there); unchanged if either isn't in [ids]. */
