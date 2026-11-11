@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 8-11: the same as backup_rules.xml. -->
+<full-backup-content>
+    <exclude domain="sharedpref" path="app.xml" />
+    <exclude domain="sharedpref" path="updates.xml" />
+</full-backup-content>

@@ -1,0 +1,33 @@
+*.iml
+.gradle/
+/local.properties
+/.idea/
+.DS_Store
+**/build/
+.kotlin/
+.externalNativeBuild/
+.cxx/
+/captures/
+*.apk
+*.aab
+/.claude/
+/.codex/
+
+# Local working notes
+/NOTES.md
+/CLAUDE.md
+/AGENTS.md
+
+# Credentials and signing material
+.env
+.env.*
+*.jks
+*.keystore
+*.p12
+*.pem
+keystore.properties
+secrets.properties
+google-services.json
+*.db
+*.db-shm
+*.db-wal
