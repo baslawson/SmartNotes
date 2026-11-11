@@ -10,6 +10,8 @@ import kotlinx.coroutines.sync.withLock
 import java.time.Clock
 import java.time.LocalDate
 import java.time.LocalDateTime
+import java.time.Instant
+import java.time.ZoneId
 
 /** Shopping lists (undated, or for a day with an optional reminder), their items, and the items ever added. */
 class ShoppingRepository(
@@ -35,7 +37,9 @@ class ShoppingRepository(
         val now = clock.millis()
         val existing = dao.findByKey(listId, key)
         if (existing == null) {
-            dao.insert(ShoppingItem(listId = listId, name = parsed.name, key = key, quantity = parsed.quantity, addedAt = now))
+            // At the end of "My order", as in the order added.
+            dao.insert(ShoppingItem(listId = listId, name = parsed.name, key = key, quantity = parsed.quantity, addedAt = now,
+                position = dao.maxItemPosition(listId) + 1))
         } else {
             dao.update(
                 existing.copy(
@@ -52,7 +56,7 @@ class ShoppingRepository(
     }
 
     suspend fun setChecked(item: ShoppingItem, checked: Boolean) = lock.withLock {
-        dao.update(item.copy(checked = checked, checkedAt = if (checked) clock.millis() else 0))
+        dao.setChecked(item.id, checked, if (checked) clock.millis() else 0)
     }
 
     suspend fun delete(id: Long) = lock.withLock { dao.delete(id) }
@@ -82,7 +86,10 @@ class ShoppingRepository(
         // A list moved to the bin meanwhile (another window) isn't brought back by saving it.
         if (list.id != 0L && dao.allLists().none { it.id == list.id }) return@withLock list.id
         val named = list.copy(name = list.name.trim().ifEmpty { "Shopping" }, deletedAt = null)
-        val id = if (named.id == 0L) dao.insertList(named.copy(createdAt = clock.millis())) else named.id.also { dao.updateList(named) }
+        val id = if (named.id == 0L) dao.insertList(named.copy(createdAt = clock.millis(), position = dao.maxListPosition() + 1)) else named.id.also {
+            // Its place in "My order" stays as stored (the dialog's copy may be older than a drag).
+            dao.updateList(named.copy(position = dao.list(named.id)?.position ?: named.position))
+        }
         alarms.sync(AlarmScheduler.LIST, id, setOfNotNull(named.reminderTime()))
         AppLog.i("Shopping", "Saved list $id \"${named.name}\" date=${named.date} reminder=${named.remindAt} sound=${named.sound}")
         id
@@ -92,12 +99,45 @@ class ShoppingRepository(
     suspend fun listForDate(date: LocalDate): Long = lock.withLock {
         val key = date.toString()
         dao.allLists().firstOrNull { it.date == key }?.id ?: dao.insertList(
-            ShoppingList(name = key, date = key, createdAt = clock.millis())
+            ShoppingList(name = key, date = key, createdAt = clock.millis(), position = dao.maxListPosition() + 1)
         ).also { AppLog.i("Shopping", "New list $it for $key") }
     }
 
     /** Moves lists (with their items) to the recycle bin; reminders cancelled. List 1 (Anytime) always stays. */
-    suspend fun trashLists(ids: List<Long>) = lock.withLock {
+    suspend fun trashLists(ids: List<Long>) = lock.withLock { trashUnlocked(ids) }
+
+    /**
+     * Tidies past lists (see [listsToTidy]) into the recycle bin, except [keep] (the list on screen). Run when Shopping
+     * opens. "Today" is in the phone's current time zone, as the screen shows it.
+     */
+    suspend fun tidyPast(keep: Long, today: LocalDate = LocalDate.now()) = lock.withLock {
+        val lists = dao.allLists().filter { it.id != keep }
+        val past = lists.filter { l -> l.date?.let { runCatching { LocalDate.parse(it) }.getOrNull() }?.isBefore(today) == true }
+        val withOpen = past.filter { dao.openItems(it.id).isNotEmpty() }.map { it.id }.toSet()
+        val ids = listsToTidy(lists, today, withOpen, ZoneId.systemDefault())
+        if (ids.isNotEmpty()) {
+            trashUnlocked(ids)
+            AppLog.i("Shopping", "Tidied ${ids.size} past list(s) with nothing left to buy")
+        }
+    }
+
+    /** "My order": the lists' ids in their new order. */
+    suspend fun arrangeLists(ids: List<Long>) = lock.withLock { dao.setListPositions(ids) }
+
+    /** "My order": the items' ids (of one list) in their new order. */
+    suspend fun arrangeItems(ids: List<Long>) = lock.withLock { dao.setItemPositions(ids) }
+
+    /** "My order" chosen the first time: [order] of the list's items still to buy, read and saved in one go. */
+    suspend fun arrangeItemsFrom(listId: Long, order: (List<ShoppingItem>) -> List<ShoppingItem>) = lock.withLock {
+        dao.setItemPositions(order(dao.openItems(listId)).map { it.id })
+    }
+
+    /** "My order" chosen the first time for the lists: [order] of the lists in use, read and saved in one go. */
+    suspend fun arrangeListsFrom(order: (List<ShoppingList>) -> List<ShoppingList>) = lock.withLock {
+        dao.setListPositions(order(dao.allLists()).map { it.id })
+    }
+
+    private suspend fun trashUnlocked(ids: List<Long>) {
         val those = ids.filter { it != 1L }
         those.chunked(CHUNK).forEach { dao.setDeleted(it, clock.millis()) }
         those.forEach { alarms.sync(AlarmScheduler.LIST, it, emptySet()); alarms.dismiss(AlarmScheduler.LIST, it) }
@@ -112,7 +152,8 @@ class ShoppingRepository(
         for (id in ids) {
             val list = dao.list(id)?.takeIf { it.deletedAt != null } ?: continue
             val taken = dao.allLists().mapNotNull { it.date }.toSet()
-            val back = restoredList(list, taken)
+            // Brought back by hand, so it is kept: counted as made now, it isn't tidied away again (see listsToTidy).
+            val back = restoredList(list, taken).copy(createdAt = clock.millis())
             dao.updateList(back)
             alarms.sync(AlarmScheduler.LIST, id, setOfNotNull(back.reminderTime()))
             AppLog.i("Shopping", "Restored list $id" + if (back.date != list.date) " without its date (${list.date} has a list)" else "")
@@ -128,6 +169,29 @@ class ShoppingRepository(
 
     fun observeDeletedLists(): Flow<List<ShoppingList>> = dao.observeDeletedLists()
     suspend fun itemCount(listId: Long): Int = dao.itemCount(listId)
+}
+
+/**
+ * Lists to tidy away: in use, their day before [today], nothing left to buy ([withOpenItems] are the lists with unticked
+ * items), and made by their day. One made later (a list for a past day written up afterwards) or brought back from the
+ * recycle bin after its day is kept.
+ */
+fun listsToTidy(lists: List<ShoppingList>, today: LocalDate, withOpenItems: Set<Long>, zone: ZoneId): List<Long> = lists.filter { l ->
+    val day = l.date?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+    val made = Instant.ofEpochMilli(l.createdAt).atZone(zone).toLocalDate()
+    l.id != 1L && l.deletedAt == null && day != null && day.isBefore(today) && l.id !in withOpenItems && !made.isAfter(day)
+}.map { it.id }
+
+/**
+ * The order of the list chips: Anytime (undated) first, then today and the days to come (soonest first), then past
+ * days (newest first), so today's and tomorrow's lists are never pushed out of sight by old ones.
+ */
+fun orderLists(lists: List<ShoppingList>, today: LocalDate): List<ShoppingList> {
+    val dated = lists.map { it to it.date?.let { d -> runCatching { LocalDate.parse(d) }.getOrNull() } }
+    val undated = dated.filter { it.second == null }.map { it.first }.sortedBy { it.id }
+    val coming = dated.filter { it.second?.isBefore(today) == false }.sortedWith(compareBy({ it.second }, { it.first.id })).map { it.first }
+    val past = dated.filter { it.second?.isBefore(today) == true }.sortedWith(compareByDescending<Pair<ShoppingList, LocalDate?>> { it.second }.thenBy { it.first.id }).map { it.first }
+    return undated + coming + past
 }
 
 /** A shopping list's reminder time: none without a date and time, or when it is in the recycle bin. */

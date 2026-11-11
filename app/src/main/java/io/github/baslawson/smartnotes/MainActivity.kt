@@ -225,19 +225,19 @@ private fun AppNavHost(nav: NavHostController, app: SmartNotesApp) {
     val back: () -> Unit = { if (!nav.popBackStack()) nav.navigate(NOTES) }
     NavHost(nav, startDestination = NOTES) {
         composable(NOTES) {
-            val vm = viewModel { NotesViewModel(app.notes, app.bin, app.appScope, app.state) }
+            val vm = viewModel { NotesViewModel(app.notes, app.bin, app.appScope, app.state, app.settings) }
             NotesScreen(
                 vm, onOpen = open, onNew = { nav.navigate(noteRoute(0)) },
                 onSettings = { nav.navigate(SETTINGS) }, onBin = { nav.navigate(BIN) }, bottomBar = bottomBar,
             )
         }
         composable(TASKS) {
-            val vm = viewModel { TodoViewModel(app.todos, app.bin, app.appScope) }
+            val vm = viewModel { TodoViewModel(app.todos, app.bin, app.appScope, app.settings) }
             TasksScreen(vm, onOpen = { nav.navigate("todo/$it") }, onBack = back, bottomBar = bottomBar)
         }
         composable(SHOPPING_ROUTE, arguments = listOf(navArgument("list") { type = NavType.LongType; defaultValue = 0L })) { entry ->
             val start = entry.arguments?.getLong("list") ?: 0L
-            val vm = viewModel { ShoppingViewModel(app.shopping, app.bin, app.appScope, app.getSharedPreferences("lists", android.content.Context.MODE_PRIVATE), start) }
+            val vm = viewModel { ShoppingViewModel(app.shopping, app.bin, app.appScope, app.getSharedPreferences("lists", android.content.Context.MODE_PRIVATE), start, app.settings) }
             // Opened again for another list (from a reminder): show that one.
             LaunchedEffect(start) { if (start > 0) vm.select(start) }
             val setting by app.settings.reminderSound.collectAsStateWithLifecycle()

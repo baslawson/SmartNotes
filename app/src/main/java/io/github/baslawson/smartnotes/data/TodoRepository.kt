@@ -5,6 +5,7 @@ import io.github.baslawson.smartnotes.reminders.AlarmPlanner
 import io.github.baslawson.smartnotes.reminders.AlarmScheduler
 import io.github.baslawson.smartnotes.reminders.Repeat
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.time.Clock
@@ -15,13 +16,22 @@ import java.time.LocalDateTime
 class TodoRepository(private val dao: TodoDao, private val alarms: AlarmScheduler, private val clock: Clock = Clock.systemDefaultZone()) {
     private val lock = Mutex()
 
+    /** "My order": the tasks' ids in their new order (under the lock, like saves). */
+    suspend fun arrange(ids: List<Long>) = lock.withLock { dao.setPositions(ids) }
+
+    /** "My order" chosen the first time: [order] of the open tasks, read and saved in one go. */
+    suspend fun arrangeFrom(order: (List<Todo>) -> List<Todo>) = lock.withLock {
+        dao.setPositions(order(dao.observeAll().first().filter { !it.done && it.deletedAt == null }).map { it.id })
+    }
+
     fun observeAll(): Flow<List<Todo>> = dao.observeAll()
     /** The task, unless it is gone or in the recycle bin (an old notification then opens nothing). */
     suspend fun get(id: Long): Todo? = dao.get(id)?.takeIf { it.deletedAt == null }
 
     suspend fun add(title: String): Long = lock.withLock {
         val now = clock.millis()
-        val id = dao.insert(Todo(title = title.trim(), createdAt = now, updatedAt = now))
+        // New tasks go on top of "My order".
+        val id = dao.insert(Todo(title = title.trim(), createdAt = now, updatedAt = now, position = dao.minPosition() - 1))
         AppLog.i("Todo", "Added task $id \"${title.trim()}\"")
         id
     }

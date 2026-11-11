@@ -9,6 +9,14 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import io.github.baslawson.smartnotes.AppLog
+import io.github.baslawson.smartnotes.data.orderLists
+import io.github.baslawson.smartnotes.data.Sorting
+import io.github.baslawson.smartnotes.data.ListSort
+import io.github.baslawson.smartnotes.data.ItemSort
+import io.github.baslawson.smartnotes.data.TaskSort
+import io.github.baslawson.smartnotes.data.NoteSort
+import io.github.baslawson.smartnotes.AppSettings
 import io.github.baslawson.smartnotes.data.Note
 import io.github.baslawson.smartnotes.AppState
 import io.github.baslawson.smartnotes.data.BinKind
@@ -79,15 +87,36 @@ data class NotesState(
     val tags: List<Pair<String, Int>> = emptyList(),
     val terms: List<String> = emptyList(),
     val loaded: Boolean = false,
+    /** The tag filter these rows were made with (it can be a moment behind the chip). */
+    val tag: String? = null,
 )
 
 @OptIn(FlowPreview::class, ExperimentalCoroutinesApi::class)
 class NotesViewModel(
-    repo: NoteRepository,
+    private val repo: NoteRepository,
     private val bin: RecycleBin,
     private val appScope: CoroutineScope,
     private val saved: AppState? = null,
+    private val settings: AppSettings,
 ) : ViewModel() {
+    val sort: StateFlow<NoteSort> = settings.noteSort
+
+    /** The sort button. The first time "My order" is chosen, the order on screen then becomes its start. */
+    fun setSort(new: NoteSort) {
+        val old = sort.value
+        if (new == NoteSort.MINE && !settings.arranged(ARRANGED)) {
+            settings.setArranged(ARRANGED)
+            appScope.launch { repo.arrangeFrom { all -> Sorting.notes(all, old) { NoteParser.displayTitle(it.title, it.body) } } }
+        }
+        settings.setNoteSort(new)
+    }
+
+    /** A drag ended: [ids] are all the notes in their new order. */
+    fun arrange(ids: List<Long>) {
+        settings.setArranged(ARRANGED)
+        appScope.launch { repo.arrange(ids) }
+    }
+
     val selection = Selection()
 
     /** Moves the selected notes to the recycle bin. */
@@ -110,15 +139,17 @@ class NotesViewModel(
         query.debounce(150).flatMapLatest { q -> repo.search(q).map { q to it } },
         repo.observeAll(),
         tag,
-    ) { (q, results), all, selected ->
+        sort,
+    ) { (q, results), all, selected, order ->
         val terms = Search.terms(q)
         val tagsOf = all.associate { it.id to NoteParser.tags(it.title + "\n" + it.body) }
         val counts = tagsOf.values.flatten().groupingBy { it }.eachCount()
             .toList().sortedWith(compareByDescending<Pair<String, Int>> { it.second }.thenBy { it.first })
             // A selected tag that no note has any more stays as a chip (count 0), so it can still be switched off.
             .let { list -> if (selected != null && list.none { it.first == selected }) listOf(selected to 0) + list else list }
-        val rows = results
-            .filter { selected == null || selected in tagsOf[it.id].orEmpty() }
+        val rows = Sorting.notes(results.filter { selected == null || selected in tagsOf[it.id].orEmpty() }, order) {
+            NoteParser.displayTitle(it.title, it.body)
+        }
             .map { note ->
                 NoteRow(
                     note = note,
@@ -128,8 +159,12 @@ class NotesViewModel(
                     openTasks = NoteParser.tasks(note.body).count { !it.done },
                 )
             }
-        NotesState(rows, counts, terms, loaded = true)
+        NotesState(rows, counts, terms, loaded = true, tag = selected)
     }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SHARING, NotesState())
+
+    private companion object {
+        const val ARRANGED = "notes"
+    }
 }
 
 // ---------- Editor ----------
@@ -166,6 +201,8 @@ class EditorViewModel(
 ) : ViewModel() {
     var id by mutableLongStateOf(startId)
         private set
+    /** Opened as a new note (the + button, or a [[link]] to a note not written yet). */
+    val isNew = startId == 0L
     var title by mutableStateOf(TextFieldValue(startTitle))
         private set
     var body by mutableStateOf(TextFieldValue(""))
@@ -375,8 +412,30 @@ fun listToShow(wanted: Long, lists: List<ShoppingList>): Long? = wanted.takeIf {
 data class TodoState(val todos: List<Todo> = emptyList(), val loaded: Boolean = false)
 
 /** Tasks: one anytime checklist; any task can have its own reminder. */
-class TodoViewModel(private val repo: TodoRepository, private val bin: RecycleBin, private val appScope: CoroutineScope) : ViewModel() {
+class TodoViewModel(
+    private val repo: TodoRepository,
+    private val bin: RecycleBin,
+    private val appScope: CoroutineScope,
+    private val settings: AppSettings,
+) : ViewModel() {
     val selection = Selection()
+    val sort: StateFlow<TaskSort> = settings.taskSort
+
+    /** The sort button. The first time "My order" is chosen, the open tasks' order then becomes its start. */
+    fun setSort(new: TaskSort) {
+        val old = sort.value
+        if (new == TaskSort.MINE && !settings.arranged("tasks")) {
+            settings.setArranged("tasks")
+            appScope.launch { repo.arrangeFrom { open -> Sorting.tasks(open, old) } }
+        }
+        settings.setTaskSort(new)
+    }
+
+    /** A drag ended: [ids] are the open tasks in their new order. */
+    fun arrange(ids: List<Long>) {
+        settings.setArranged("tasks")
+        appScope.launch { repo.arrange(ids) }
+    }
 
     fun deleteSelected() {
         val ids = selection.ids.toList()
@@ -527,10 +586,51 @@ class ShoppingViewModel(
     private val appScope: CoroutineScope,
     private val prefs: android.content.SharedPreferences?,
     startList: Long,
+    private val settings: AppSettings,
 ) : ViewModel() {
+    val itemSort: StateFlow<ItemSort> = settings.itemSort
+    val listSort: StateFlow<ListSort> = settings.listSort
+
+    /** The items' sort button. The first time "My order" is chosen for a list, its items' order then becomes its start. */
+    fun setItemSort(new: ItemSort) {
+        val old = itemSort.value
+        val list = listId.value
+        if (new == ItemSort.MINE && list > 0 && !settings.arranged("items:$list")) {
+            settings.setArranged("items:$list")
+            appScope.launch { repo.arrangeItemsFrom(list) { open -> Sorting.items(open, old) } }
+        }
+        settings.setItemSort(new)
+    }
+
+    /** The lists' sort button; "My order" starts from the date order. */
+    fun setListSort(new: ListSort) {
+        if (new == ListSort.MINE && !settings.arranged("lists")) {
+            settings.setArranged("lists")
+            appScope.launch { repo.arrangeListsFrom { lists -> orderLists(lists, java.time.LocalDate.now()) } }
+        }
+        settings.setListSort(new)
+    }
+
+    /** A drag ended: the open items of the list shown, in their new order (that list counts as arranged from now on). */
+    fun arrangeItems(ids: List<Long>) {
+        listId.value.takeIf { it > 0 }?.let { settings.setArranged("items:$it") }
+        appScope.launch { repo.arrangeItems(ids) }
+    }
+
+    /** Arrange lists: every list in its new order. */
+    fun arrangeLists(ids: List<Long>) {
+        settings.setArranged("lists")
+        appScope.launch { repo.arrangeLists(ids) }
+    }
+
     /** The list shown: the one asked for (a reminder), else the last one looked at; 0 = none yet (today's opens). */
     val listId = MutableStateFlow(if (startList > 0) startList else prefs?.getLong(KEY, 0L) ?: 0L)
     var input by mutableStateOf("")
+
+    init {
+        // Once per visit to Shopping: past lists with nothing left to buy go to the recycle bin (not the one shown).
+        appScope.launch { runCatching { repo.tidyPast(keep = listId.value) }.onFailure { AppLog.w("Shopping", "Tidy failed", it) } }
+    }
 
     val state: StateFlow<ShoppingState> = combine(
         repo.observeLists(), listId.flatMapLatest { repo.observeItems(it) }, repo.observeHistory(),

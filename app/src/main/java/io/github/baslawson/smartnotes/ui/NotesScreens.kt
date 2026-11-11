@@ -55,6 +55,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.material3.Surface
+import sh.calvin.reorderable.rememberReorderableLazyListState
+import sh.calvin.reorderable.ReorderableItem
+import io.github.baslawson.smartnotes.data.Sorting
+import io.github.baslawson.smartnotes.data.NoteSort
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -101,6 +109,11 @@ fun NotesScreen(
     LaunchedEffect(state.rows) { if (state.loaded) selection.keepOnly(state.rows.map { it.note.id }) }
     val query by vm.query.collectAsStateWithLifecycle()
     val selectedTag by vm.tag.collectAsStateWithLifecycle()
+    val sort by vm.sort.collectAsStateWithLifecycle()
+    // Dragging is for the whole list: not while searching, filtering by a tag or selecting.
+    // (state.terms: the rows shown still belong to a search until it has cleared.)
+    val canArrange = sort == NoteSort.MINE && query.isBlank() && state.terms.isEmpty() && selectedTag == null && state.tag == null &&
+        !selection.active
 
     Scaffold(
         topBar = {
@@ -112,6 +125,7 @@ fun NotesScreen(
                 TopAppBar(
                     title = { Text("Notes") },
                     actions = {
+                        SortButton(SortGroup(null, NoteSort.entries, sort, { it.label }, vm::setSort))
                         IconButton(onClick = onSettings) { Icon(Icons.Default.Settings, contentDescription = "Settings") }
                         Box {
                             IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, contentDescription = "More") }
@@ -166,10 +180,33 @@ fun NotesScreen(
                     if (query.isBlank() && selectedTag == null) "No notes yet. Tap + to write one."
                     else "Nothing found."
                 )
-                else -> LazyColumn(Modifier.fillMaxSize(), rememberLastScroll("notes"), contentPadding = PaddingValues(bottom = 88.dp)) {
-                    items(state.rows, key = { it.note.id }) { row ->
-                        NoteRowItem(row, state.terms, Modifier.selectable(selection, row.note.id) { onOpen(row.note.id) })
-                        HorizontalDivider()
+                else -> {
+                    val list = rememberLastScroll("notes")
+                    val byId = state.rows.associateBy { it.note.id }
+                    val order = rememberDragOrder(state.rows.map { it.note.id })
+                    val reorder = rememberReorderableLazyListState(list) { from, to ->
+                        val a = from.key as? Long
+                        val b = to.key as? Long
+                        // Pinned notes move among the pinned, the others among the others.
+                        if (a != null && b != null && byId[a]?.note?.pinned == byId[b]?.note?.pinned) order.move(a, b)
+                    }
+                    LazyColumn(Modifier.fillMaxSize(), list, contentPadding = PaddingValues(bottom = 88.dp)) {
+                        items(order.ids.mapNotNull { byId[it] }, key = { it.note.id }) { row ->
+                            ReorderableItem(reorder, key = row.note.id, enabled = canArrange) { dragging ->
+                                Surface(shadowElevation = if (dragging) 6.dp else 0.dp) {
+                                    Column {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            NoteRowItem(row, state.terms, Modifier.weight(1f).selectable(selection, row.note.id) { onOpen(row.note.id) })
+                                            if (canArrange) DragHandleIcon(
+                                                row.title,
+                                                Modifier.draggableHandle(onDragStarted = { order.start() }, onDragStopped = { vm.arrange(order.stop()) }).padding(12.dp),
+                                            )
+                                        }
+                                        HorizontalDivider()
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -247,6 +284,17 @@ fun EditorScreen(vm: EditorViewModel, onBack: () -> Unit, onOpen: (Long) -> Unit
             focusedContainerColor = Color.Transparent, unfocusedContainerColor = Color.Transparent,
             focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent,
         )
+        // A new note opens ready for typing: the cursor in the text and the keyboard up (once, not again after turning).
+        val textFocus = remember { FocusRequester() }
+        val keyboard = LocalSoftwareKeyboardController.current
+        var focused by rememberSaveable { mutableStateOf(false) }
+        LaunchedEffect(Unit) {
+            if (vm.isNew && !focused) {
+                focused = true
+                textFocus.requestFocus()
+                keyboard?.show()
+            }
+        }
         Column(Modifier.padding(padding).fillMaxSize().imePadding().verticalScroll(rememberScrollState())) {
             TextField(
                 value = vm.title, onValueChange = vm::onTitleChange, readOnly = !vm.loaded,
@@ -258,7 +306,7 @@ fun EditorScreen(vm: EditorViewModel, onBack: () -> Unit, onOpen: (Long) -> Unit
                 value = vm.body, onValueChange = vm::onBodyChange, readOnly = !vm.loaded,
                 placeholder = { Text("Type something…") },
                 keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(capitalization = androidx.compose.ui.text.input.KeyboardCapitalization.Sentences),
-                colors = fieldColors, modifier = Modifier.fillMaxWidth(),
+                colors = fieldColors, modifier = Modifier.fillMaxWidth().focusRequester(textFocus),
             )
             // A link to this note itself opens nothing (it is already open).
             NoteInfo(info, onOpen = { if (it != vm.id) onOpen(it) }, onCreateLinked = onCreateLinked, onTick = vm::toggleCheckbox)

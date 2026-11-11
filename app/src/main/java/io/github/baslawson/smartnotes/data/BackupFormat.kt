@@ -45,22 +45,23 @@ object BackupFormat {
         put("appVersion", data.appVersion)
         put("notes", JSONArray(data.notes.map { n ->
             JSONObject().put("id", n.id).put("title", n.title).put("body", n.body).put("pinned", n.pinned)
-                .put("createdAt", n.createdAt).put("updatedAt", n.updatedAt).putOpt("deletedAt", n.deletedAt)
+                .put("createdAt", n.createdAt).put("updatedAt", n.updatedAt).putOpt("deletedAt", n.deletedAt).put("position", n.position)
         }))
         put("todos", JSONArray(data.todos.map { t ->
             JSONObject().put("id", t.id).put("title", t.title).put("details", t.details).put("done", t.done)
                 .put("doneAt", t.doneAt).putOpt("dueDate", t.dueDate).putOpt("dueTime", t.dueTime).put("remind", t.remind)
                 .put("sound", t.sound).put("repeat", t.repeat).put("repeatEvery", t.repeatEvery).put("repeatDay", t.repeatDay)
                 .put("priority", t.priority).put("createdAt", t.createdAt).put("updatedAt", t.updatedAt)
-                .putOpt("deletedAt", t.deletedAt)
+                .putOpt("deletedAt", t.deletedAt).put("position", t.position)
         }))
         put("shoppingLists", JSONArray(data.lists.map { l ->
             JSONObject().put("id", l.id).put("name", l.name).putOpt("date", l.date).putOpt("remindAt", l.remindAt)
-                .put("sound", l.sound).put("createdAt", l.createdAt).putOpt("deletedAt", l.deletedAt)
+                .put("sound", l.sound).put("createdAt", l.createdAt).putOpt("deletedAt", l.deletedAt).put("position", l.position)
         }))
         put("shoppingItems", JSONArray(data.items.map { i ->
             JSONObject().put("id", i.id).put("listId", i.listId).put("name", i.name).put("key", i.key)
                 .put("quantity", i.quantity).put("checked", i.checked).put("addedAt", i.addedAt).put("checkedAt", i.checkedAt)
+                .put("position", i.position)
         }))
         put("shoppingHistory", JSONArray(data.history.map { h ->
             JSONObject().put("key", h.key).put("name", h.name).put("useCount", h.useCount).put("lastUsed", h.lastUsed)
@@ -85,7 +86,7 @@ object BackupFormat {
             // Every part must be there (an empty list is fine): a missing one would otherwise restore as "nothing".
             val notes = root.objects("notes").map { o ->
                 Note(o.getLong("id"), o.text("title"), o.text("body"), o.optBoolean("pinned"),
-                    o.optLong("createdAt"), o.optLong("updatedAt"), o.longOrNull("deletedAt"))
+                    o.optLong("createdAt"), o.optLong("updatedAt"), o.longOrNull("deletedAt"), o.optLong("position"))
             }
             val todos = root.objects("todos").map { o ->
                 Todo(
@@ -94,17 +95,17 @@ object BackupFormat {
                     dueTime = o.stringOrNull("dueTime"), remind = o.optBoolean("remind"), sound = o.optString("sound", "DEFAULT"),
                     repeat = o.optString("repeat", "NONE"), repeatEvery = o.optInt("repeatEvery", 1), repeatDay = o.optInt("repeatDay"),
                     priority = o.optInt("priority", 1), createdAt = o.optLong("createdAt"), updatedAt = o.optLong("updatedAt"),
-                    deletedAt = o.longOrNull("deletedAt"),
+                    deletedAt = o.longOrNull("deletedAt"), position = o.optLong("position"),
                 )
             }
             val lists = root.objects("shoppingLists").map { o ->
                 ShoppingList(o.getLong("id"), o.text("name"), o.stringOrNull("date"), o.stringOrNull("remindAt"),
-                    o.optString("sound", "DEFAULT"), o.optLong("createdAt"), o.longOrNull("deletedAt"))
+                    o.optString("sound", "DEFAULT"), o.optLong("createdAt"), o.longOrNull("deletedAt"), o.optLong("position"))
             }
             val listIds = lists.map { it.id }.toSet() + 1L
             val items = root.objects("shoppingItems").map { o ->
                 ShoppingItem(o.getLong("id"), o.optLong("listId", 1), o.text("name"), o.text("key"),
-                    o.optString("quantity"), o.optBoolean("checked"), o.optLong("addedAt"), o.optLong("checkedAt"))
+                    o.optString("quantity"), o.optBoolean("checked"), o.optLong("addedAt"), o.optLong("checkedAt"), o.optLong("position"))
             }
             if (items.any { it.listId !in listIds }) throw BackupException(DAMAGED)
             val history = root.objects("shoppingHistory").map { o ->

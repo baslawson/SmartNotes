@@ -15,12 +15,14 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         Note::class, NoteFts::class, ShoppingItem::class, ShoppingHistory::class,
         ShoppingList::class, Todo::class, AlarmEntry::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = true,
     autoMigrations = [
         AutoMigration(from = 1, to = 2, spec = NoteDatabase.To2::class),
         // Version 3: todos.repeatDay (monthly repeats keep their day); tasks are one list (no todo_lists, no listId).
         AutoMigration(from = 2, to = 3, spec = NoteDatabase.To3::class),
+        // Version 4: a position on notes, tasks, shopping lists and items, for "My order".
+        AutoMigration(from = 3, to = 4),
     ],
 )
 abstract class NoteDatabase : RoomDatabase() {

@@ -16,8 +16,8 @@ android {
         applicationId = "io.github.baslawson.smartnotes"
         minSdk = 26 // java.time works natively from API 26
         targetSdk = 36 // Android 16, as on the Samsung Galaxy S26
-        versionCode = 3
-        versionName = "0.2.1"
+        versionCode = 4
+        versionName = "0.2.2"
     }
 
     // The release key lives outside the repository. keystore.properties (git-ignored) points at it;
@@ -72,6 +72,7 @@ dependencies {
     implementation(libs.androidx.work.runtime)
     // GitHub releases for Settings → Updates.
     implementation(libs.okhttp)
+    implementation(libs.reorderable)
 
     // Plain JVM tests (app/src/test): note parsing, search, shopping list, the log file and updates.
     testImplementation(libs.junit)

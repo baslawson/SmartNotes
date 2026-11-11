@@ -4,6 +4,7 @@ import io.github.baslawson.smartnotes.AppLog
 import io.github.baslawson.smartnotes.parse.NoteParser
 import io.github.baslawson.smartnotes.parse.Search
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.time.Clock
@@ -14,6 +15,14 @@ class NoteRepository(
 ) {
     // Saves read the stored note and write it back; one at a time, so two saves can't undo each other.
     private val lock = Mutex()
+
+    /** "My order": the notes' ids in their new order (under the lock, so a save meanwhile can't put an old place back). */
+    suspend fun arrange(ids: List<Long>) = lock.withLock { dao.setPositions(ids) }
+
+    /** "My order" chosen the first time: [order] of the notes in use, read and saved in one go. */
+    suspend fun arrangeFrom(order: (List<Note>) -> List<Note>) = lock.withLock {
+        dao.setPositions(order(dao.observeAll().first()).map { it.id })
+    }
 
     fun observeAll(): Flow<List<Note>> = dao.observeAll()
 
@@ -90,7 +99,8 @@ class NoteRepository(
             // Deleted meanwhile (elsewhere, or to the bin): not brought back as a new note.
             id != 0L && existing == null -> 0L.also { AppLog.w("Notes", "Save skipped: note $id no longer exists") }
             existing == null && blank -> 0L
-            existing == null -> dao.insert(Note(title = title, body = body, createdAt = now, updatedAt = now))
+            // New notes go on top of "My order".
+            existing == null -> dao.insert(Note(title = title, body = body, createdAt = now, updatedAt = now, position = dao.minPosition() - 1))
             blank && deleteIfBlank -> { dao.delete(existing.id); 0L }
             existing.title == title && existing.body == body -> existing.id
             else -> { dao.update(existing.copy(title = title, body = body, updatedAt = now)); existing.id }

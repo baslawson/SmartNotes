@@ -3,6 +3,7 @@ package io.github.baslawson.smartnotes.data
 import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.Query
+import androidx.room.Transaction
 import androidx.room.Update
 import androidx.room.Upsert
 import kotlinx.coroutines.flow.Flow
@@ -54,6 +55,18 @@ interface NoteDao {
 
     @Query("DELETE FROM notes WHERE id = :id")
     suspend fun delete(id: Long)
+
+    // ---------- My order ----------
+
+    @Query("UPDATE notes SET position = :position WHERE id = :id")
+    suspend fun setPosition(id: Long, position: Long)
+
+    @Query("SELECT COALESCE(MIN(position), 0) FROM notes")
+    suspend fun minPosition(): Long
+
+    /** [ids] in their new order, numbered 0, 1, 2… in one go. */
+    @Transaction
+    suspend fun setPositions(ids: List<Long>) { ids.forEachIndexed { i, id -> setPosition(id, i.toLong()) } }
 }
 
 @Dao
@@ -153,6 +166,30 @@ interface ShoppingDao {
 
     @Query("DELETE FROM shopping_history WHERE `key` = :key")
     suspend fun forget(key: String)
+
+    // ---------- My order ----------
+
+    /** Ticks or unticks just that (not the rest of the row, which may have changed meanwhile: its place, say). */
+    @Query("UPDATE shopping_items SET checked = :checked, checkedAt = :checkedAt WHERE id = :id")
+    suspend fun setChecked(id: Long, checked: Boolean, checkedAt: Long)
+
+    @Query("UPDATE shopping_items SET position = :position WHERE id = :id")
+    suspend fun setItemPosition(id: Long, position: Long)
+
+    @Query("SELECT COALESCE(MAX(position), 0) FROM shopping_items WHERE listId = :listId")
+    suspend fun maxItemPosition(listId: Long): Long
+
+    @Transaction
+    suspend fun setItemPositions(ids: List<Long>) { ids.forEachIndexed { i, id -> setItemPosition(id, i.toLong()) } }
+
+    @Query("UPDATE shopping_lists SET position = :position WHERE id = :id")
+    suspend fun setListPosition(id: Long, position: Long)
+
+    @Query("SELECT COALESCE(MAX(position), 0) FROM shopping_lists")
+    suspend fun maxListPosition(): Long
+
+    @Transaction
+    suspend fun setListPositions(ids: List<Long>) { ids.forEachIndexed { i, id -> setListPosition(id, i.toLong()) } }
 }
 
 @Dao
@@ -194,6 +231,17 @@ interface TodoDao {
     @Query("DELETE FROM todos WHERE id = :id")
     suspend fun delete(id: Long)
 
+
+    // ---------- My order ----------
+
+    @Query("UPDATE todos SET position = :position WHERE id = :id")
+    suspend fun setPosition(id: Long, position: Long)
+
+    @Query("SELECT COALESCE(MIN(position), 0) FROM todos")
+    suspend fun minPosition(): Long
+
+    @Transaction
+    suspend fun setPositions(ids: List<Long>) { ids.forEachIndexed { i, id -> setPosition(id, i.toLong()) } }
 }
 
 @Dao

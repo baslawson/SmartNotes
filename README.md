@@ -15,6 +15,7 @@ Everything "smart" in a note is read from its plain text, so the text stays the 
 
 Also: full-text search (Room FTS4, word prefixes, matches highlighted), related notes (shared tags and words), and
 **Share → SmartNotes** from other apps (text or a link becomes a new note; the subject is its title).
+**+** opens a new note with the cursor in its text and the keyboard up.
 
 ## Tasks
 
@@ -25,18 +26,38 @@ Feb 28 → Mar 31). Ticking a repeating task moves its reminder to the next time
 
 ## Shopping
 
-Lists are dates: *+ New list* asks for a day and opens that day's list (one per day). *Anytime* is the undated list
+Lists are dates: *+ New date* asks for a day and opens that day's list (one per day). *Anytime* is the undated list
 and can't be deleted. A dated list's ✎ changes its date or sets a reminder on that day (with its sound), or deletes it.
 Dates show as Today / Tomorrow or in Settings → Date format; the top bar shows the open list's day and full
 date. Type `2x milk`, `milk 2L` or `eggs x12`: the quantity shows apart from the name. Past items are suggested while
 typing (✕ forgets one), and an item already on the list isn't added twice. The reminder lists what is still to buy.
 Shopping opens on the list you looked at last; the first time, or if that list is gone, on today's (made if needed).
+The lists run Anytime, Today, then the days to come, then past days (newest first), and the row scrolls to the list
+shown. A past list with nothing left to buy (empty or all ticked) goes to the recycle bin by itself when Shopping is
+opened; one with things still to buy stays, and so does the list on screen. A list made for a
+past day afterwards, or brought back from the bin, is kept.
 
 ## Where you left off
 
 The app opens where it was left: the same tab, or the note or task that was open (Back goes to its list), with the
 Notes search and tag filter and each list's scroll position as they were. Not when it is opened from a reminder or a
 share, and Settings and the recycle bin aren't reopened. This is kept on the phone only (not in any backup).
+
+## Sorting and your own order
+
+The sort button (three lines) on Notes, Tasks and Shopping picks the order, remembered (and kept in backups):
+
+| Where | Orders (first is the default) | Kept apart |
+|---|---|---|
+| Notes | Last edited, Created, Title A–Z, My order | pinned notes stay on top |
+| Tasks | Priority, Due date (a date without a time counts as 9:00), Newest, A–Z, My order | done tasks stay below |
+| Shopping items | Added, A–Z, My order | ticked items stay below |
+| Shopping lists | By date (Anytime, today and coming days, then past ones), My order | — |
+
+In *My order* each row has a handle (≡): drag it to move the row (pinned notes among the pinned). The first time My
+order is chosen, the order then on screen is where it starts. New notes and tasks go on top, new items and lists at the
+end. Notes can't be dragged while searching or filtering by a tag. Lists are arranged in Shopping → sort → *Arrange
+lists…* (dragging a chip itself would clash with scrolling the row and long-press selecting).
 
 ## Selecting, deleting and the recycle bin
 

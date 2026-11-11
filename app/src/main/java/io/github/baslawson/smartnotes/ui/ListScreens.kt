@@ -15,6 +15,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyRow
+import io.github.baslawson.smartnotes.data.orderLists
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
@@ -57,7 +59,18 @@ import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import kotlinx.coroutines.flow.first
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.material3.Surface
+import sh.calvin.reorderable.rememberReorderableLazyListState
+import sh.calvin.reorderable.ReorderableItem
+import io.github.baslawson.smartnotes.data.ListSort
+import io.github.baslawson.smartnotes.data.ItemSort
+import io.github.baslawson.smartnotes.data.TaskSort
+import io.github.baslawson.smartnotes.data.Sorting
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -158,7 +171,20 @@ private fun ListChips(
     onSelect: (Long) -> Unit,
     onAdd: () -> Unit,
 ) {
+    val row = rememberLazyListState()
+    // The list being viewed is scrolled into sight (when it changes, and once the lists are there).
+    val index = names.indexOfFirst { it.first == selected }
+    LaunchedEffect(selected, index) {
+        if (index < 0) return@LaunchedEffect
+        // After the row has laid out its chips (on first showing it may not have yet).
+        snapshotFlow { row.layoutInfo.totalItemsCount }.first { it > index }
+        val info = row.layoutInfo
+        val chip = info.visibleItemsInfo.firstOrNull { it.index == index }
+        val inSight = chip != null && chip.offset >= info.viewportStartOffset && chip.offset + chip.size <= info.viewportEndOffset
+        if (!inSight) row.animateScrollToItem(index)
+    }
     LazyRow(
+        state = row,
         contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -171,7 +197,7 @@ private fun ListChips(
                 onLongClick = if (canPick) ({ selection.toggle(id) }) else null,
             )
         }
-        if (!selection.active) item { FilterChip(selected = false, onClick = onAdd, label = { Text("+ New list") }) }
+        if (!selection.active) item { FilterChip(selected = false, onClick = onAdd, label = { Text("+ New date") }) }
     }
 }
 
@@ -191,6 +217,8 @@ fun TasksScreen(vm: TodoViewModel, onOpen: (Long) -> Unit, onBack: () -> Unit, b
     val state by vm.state.collectAsStateWithLifecycle()
     val selection = vm.selection
     LaunchedEffect(state.todos) { if (state.loaded) selection.keepOnly(state.todos.map { it.id }) }
+    val sort by vm.sort.collectAsStateWithLifecycle()
+    val canArrange = sort == TaskSort.MINE && !selection.active
 
     Scaffold(
         topBar = {
@@ -198,7 +226,10 @@ fun TasksScreen(vm: TodoViewModel, onOpen: (Long) -> Unit, onBack: () -> Unit, b
                 SelectionBar(selection, state.todos.map { it.id }) {
                     IconButton(onClick = vm::deleteSelected) { Icon(Icons.Default.Delete, contentDescription = "Delete") }
                 }
-            } else TopAppBar(title = { Text("Tasks") }, navigationIcon = { BackButton(onBack) })
+            } else TopAppBar(
+                title = { Text("Tasks") }, navigationIcon = { BackButton(onBack) },
+                actions = { SortButton(SortGroup(null, TaskSort.entries, sort, { it.label }, vm::setSort)) },
+            )
         },
         bottomBar = bottomBar,
     ) { padding ->
@@ -215,11 +246,28 @@ fun TasksScreen(vm: TodoViewModel, onOpen: (Long) -> Unit, onBack: () -> Unit, b
                 Empty("No tasks yet. Type one above; tap it to add details, a priority or a reminder.")
                 return@Column
             }
-            // Open tasks: high priority first, newest first within a priority. Ticked ones below.
-            val open = state.todos.filter { !it.done }.sortedWith(compareByDescending<Todo> { it.priority }.thenByDescending { it.createdAt })
+            // Open tasks in the chosen order (see the sort button); ticked ones below, latest first.
+            val open = Sorting.tasks(state.todos.filter { !it.done }, sort)
             val done = state.todos.filter { it.done }.sortedByDescending { it.doneAt }
-            LazyColumn(Modifier.fillMaxSize(), rememberLastScroll("tasks"), contentPadding = PaddingValues(bottom = 24.dp)) {
-                items(open, key = { "t:${it.id}" }) { t -> TodoLine(t, onCheck = { vm.setDone(t, it) }, Modifier.selectable(selection, t.id) { onOpen(t.id) }) }
+            val list = rememberLastScroll("tasks")
+            val byId = open.associateBy { it.id }
+            val order = rememberDragOrder(open.map { it.id })
+            val reorder = rememberReorderableLazyListState(list) { from, to ->
+                val a = (from.key as? String)?.removePrefix("t:")?.toLongOrNull()
+                val b = (to.key as? String)?.removePrefix("t:")?.toLongOrNull()
+                if (a != null && b != null) order.move(a, b)
+            }
+            LazyColumn(Modifier.fillMaxSize(), list, contentPadding = PaddingValues(bottom = 24.dp)) {
+                items(order.ids.mapNotNull { byId[it] }, key = { "t:${it.id}" }) { t ->
+                    ReorderableItem(reorder, key = "t:${t.id}", enabled = canArrange) { dragging ->
+                        Surface(shadowElevation = if (dragging) 6.dp else 0.dp) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                TodoLine(t, onCheck = { vm.setDone(t, it) }, Modifier.weight(1f).selectable(selection, t.id) { onOpen(t.id) })
+                                if (canArrange) DragHandleIcon(t.title, Modifier.draggableHandle(onDragStarted = { order.start() }, onDragStopped = { vm.arrange(order.stop()) }).padding(12.dp))
+                            }
+                        }
+                    }
+                }
                 if (done.isNotEmpty()) {
                     item(key = "h:done") {
                         Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -403,8 +451,6 @@ private fun ShoppingList.title(style: DateStyle): String = parseDate(date)?.let 
     if (day == full) full else "$day · $full"
 } ?: label(style)
 
-/** Anytime first, then the dated lists by date. */
-private fun List<ShoppingList>.inOrder() = sortedWith(compareBy<ShoppingList>({ it.date != null }, { it.date }, { it.id }))
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -415,15 +461,19 @@ fun ShoppingScreen(vm: ShoppingViewModel, setting: ReminderSound, onBack: () -> 
     // The list being edited, kept through a rotation; the dialog keeps its own fields.
     var editingId by rememberSaveable { mutableStateOf<Long?>(null) }
     val editing = editingId?.let { id -> state.lists.firstOrNull { it.id == id } }
-    // + New list: a date picker; that day's list is made (or opened, if there is one).
+    // + New date: a date picker; that day's list is made (or opened, if there is one).
     var pickNew by rememberSaveable { mutableStateOf(false) }
     val list = state.lists.firstOrNull { it.id == listId }
     // Nothing shown yet (the first time), or the list shown has gone: today's list.
     LaunchedEffect(state.loaded, list) { if (state.loaded && listToShow(listId, state.lists) == null) vm.openToday() }
-    val open = state.items.filter { !it.checked }
+    val itemSort by vm.itemSort.collectAsStateWithLifecycle()
+    val listSort by vm.listSort.collectAsStateWithLifecycle()
+    var arrangeLists by rememberSaveable { mutableStateOf(false) }
+    val open = Sorting.items(state.items.filter { !it.checked }, itemSort)
     val checked = state.items.filter { it.checked }
     val selection = vm.selection
     val pickable = state.lists.filter { it.id != 1L }.map { it.id }
+
     LaunchedEffect(state.lists) { if (state.loaded) selection.keepOnly(pickable) }
 
     Scaffold(
@@ -435,6 +485,13 @@ fun ShoppingScreen(vm: ShoppingViewModel, setting: ReminderSound, onBack: () -> 
                 navigationIcon = { BackButton(onBack) },
                 actions = {
                     if (checked.isNotEmpty()) TextButton(onClick = { vm.clearChecked() }) { Text("Clear ticked") }
+                    SortButton(
+                        SortGroup("Items", ItemSort.entries, itemSort, { it.label }, vm::setItemSort),
+                        SortGroup("Lists", ListSort.entries, listSort, { it.label }, vm::setListSort),
+                        extra = if (listSort == ListSort.MINE) { close ->
+                            DropdownMenuItem(text = { Text("Arrange lists…") }, onClick = { close(); arrangeLists = true })
+                        } else null,
+                    )
                     if (list != null && list.id != 1L) IconButton(onClick = { editingId = list.id }) { Icon(Icons.Default.Edit, contentDescription = "List date and reminder") }
                 },
             )
@@ -442,7 +499,7 @@ fun ShoppingScreen(vm: ShoppingViewModel, setting: ReminderSound, onBack: () -> 
         bottomBar = bottomBar,
     ) { padding ->
         Column(Modifier.padding(padding).fillMaxSize()) {
-            ListChips(state.lists.inOrder().map { it.id to it.label(style) }, listId, selection, vm::select) { pickNew = true }
+            ListChips(Sorting.lists(state.lists, listSort, LocalDate.now()).map { it.id to it.label(style) }, listId, selection, vm::select) { pickNew = true }
             if (selection.active) {
                 Text("Tap lists to select them. Anytime always stays.", style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
@@ -490,9 +547,25 @@ fun ShoppingScreen(vm: ShoppingViewModel, setting: ReminderSound, onBack: () -> 
                 Empty("This list is empty. Type an item above.\n\nTap ✎ to give the list a date and a reminder.")
                 return@Column
             }
-            LazyColumn(Modifier.fillMaxSize(), rememberLastScroll("shopping:$listId"), contentPadding = PaddingValues(bottom = 24.dp)) {
-                items(open, key = { it.id }) { item ->
-                    ItemLine(item, onCheck = { vm.setChecked(item, it) }, onDelete = { vm.delete(item) })
+            val scroll = rememberLastScroll("shopping:$listId")
+            val canArrange = itemSort == ItemSort.MINE && !selection.active
+            val byId = open.associateBy { it.id }
+            val order = key(listId) { rememberDragOrder(open.map { it.id }) }
+            val reorder = rememberReorderableLazyListState(scroll) { from, to ->
+                val a = from.key as? Long
+                val b = to.key as? Long
+                // Only among the items still to buy.
+                if (a != null && b != null && a in byId && b in byId) order.move(a, b)
+            }
+            LazyColumn(Modifier.fillMaxSize(), scroll, contentPadding = PaddingValues(bottom = 24.dp)) {
+                items(order.ids.mapNotNull { byId[it] }, key = { it.id }) { item ->
+                    ReorderableItem(reorder, key = item.id, enabled = canArrange) { dragging ->
+                        Surface(shadowElevation = if (dragging) 6.dp else 0.dp) {
+                            ItemLine(item, onCheck = { vm.setChecked(item, it) }, onDelete = { vm.delete(item) }) {
+                                if (canArrange) DragHandleIcon(item.name, Modifier.draggableHandle(onDragStarted = { order.start() }, onDragStopped = { vm.arrangeItems(order.stop()) }).padding(12.dp))
+                            }
+                        }
+                    }
                 }
                 if (checked.isNotEmpty()) {
                     item { HorizontalDivider(Modifier.padding(top = 8.dp)) }
@@ -510,6 +583,9 @@ fun ShoppingScreen(vm: ShoppingViewModel, setting: ReminderSound, onBack: () -> 
             onSave = { vm.saveList(it) }, onDelete = { vm.deleteList(it) }, onDismiss = { editingId = null },
         )
     }
+    if (arrangeLists) ArrangeListsDialog(
+        Sorting.lists(state.lists, ListSort.MINE, LocalDate.now()), { it.label(style) }, vm::arrangeLists,
+    ) { arrangeLists = false }
     if (pickNew) DatePickDialog(null, onPick = { vm.openDate(it) }, onDismiss = { pickNew = false })
     if (vm.dateTaken) {
         AlertDialog(
@@ -586,7 +662,7 @@ private fun ShoppingListDialog(
 }
 
 @Composable
-private fun ItemLine(item: ShoppingItem, onCheck: (Boolean) -> Unit, onDelete: () -> Unit) {
+private fun ItemLine(item: ShoppingItem, onCheck: (Boolean) -> Unit, onDelete: () -> Unit, handle: @Composable () -> Unit = {}) {
     Row(Modifier.fillMaxWidth().clickable { onCheck(!item.checked) }, verticalAlignment = Alignment.CenterVertically) {
         Checkbox(checked = item.checked, onCheckedChange = onCheck)
         Text(
@@ -599,5 +675,43 @@ private fun ItemLine(item: ShoppingItem, onCheck: (Boolean) -> Unit, onDelete: (
             Text(item.quantity, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
         }
         IconButton(onClick = onDelete) { Icon(Icons.Default.Clear, contentDescription = "Remove ${item.name}") }
+        handle()
     }
+}
+
+/** Shopping → sort → Arrange lists…: the lists in "My order", dragged by their handles; each drop is saved. */
+@Composable
+private fun ArrangeListsDialog(
+    lists: List<ShoppingList>,
+    label: (ShoppingList) -> String,
+    onArrange: (List<Long>) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val byId = lists.associateBy { it.id }
+    val order = rememberDragOrder(lists.map { it.id })
+    val list = rememberLazyListState()
+    val reorder = rememberReorderableLazyListState(list) { from, to ->
+        val a = from.key as? Long
+        val b = to.key as? Long
+        if (a != null && b != null) order.move(a, b)
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Arrange lists") },
+        text = {
+            LazyColumn(Modifier.heightIn(max = 420.dp), list) {
+                items(order.ids.mapNotNull { byId[it] }, key = { it.id }) { l ->
+                    ReorderableItem(reorder, key = l.id) { dragging ->
+                        Surface(shadowElevation = if (dragging) 6.dp else 0.dp) {
+                            Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Text(label(l), Modifier.weight(1f))
+                                DragHandleIcon(label(l), Modifier.draggableHandle(onDragStarted = { order.start() }, onDragStopped = { onArrange(order.stop()) }).padding(8.dp))
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } },
+    )
 }

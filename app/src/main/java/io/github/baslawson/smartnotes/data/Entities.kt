@@ -18,6 +18,8 @@ data class Note(
     val updatedAt: Long = 0,
     /** When it went to the recycle bin; null while it's in use. */
     val deletedAt: Long? = null,
+    /** Place in "My order" (smaller first); see data/Sorting.kt. */
+    @ColumnInfo(defaultValue = "0") val position: Long = 0,
 )
 
 /** Full-text index over notes; Room keeps it in step with the notes table through triggers. */
@@ -39,6 +41,8 @@ data class ShoppingList(
     val createdAt: Long = 0,
     /** When it went to the recycle bin (with its items); null while it's in use. */
     val deletedAt: Long? = null,
+    /** Place in "My order" (smaller first); see data/Sorting.kt. */
+    @ColumnInfo(defaultValue = "0") val position: Long = 0,
 )
 
 @Entity(tableName = "shopping_items", indices = [Index("key"), Index("listId")])
@@ -53,6 +57,8 @@ data class ShoppingItem(
     val checked: Boolean = false,
     val addedAt: Long = 0,
     val checkedAt: Long = 0,
+    /** Place in "My order" (smaller first); see data/Sorting.kt. */
+    @ColumnInfo(defaultValue = "0") val position: Long = 0,
 )
 
 /** Every item ever added, for suggestions while typing. */
@@ -89,6 +95,8 @@ data class Todo(
     val updatedAt: Long = 0,
     /** When it went to the recycle bin; null while it's in use. */
     val deletedAt: Long? = null,
+    /** Place in "My order" (smaller first); see data/Sorting.kt. */
+    @ColumnInfo(defaultValue = "0") val position: Long = 0,
 )
 
 /**

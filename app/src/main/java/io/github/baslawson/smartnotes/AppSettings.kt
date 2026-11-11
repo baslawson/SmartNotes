@@ -1,5 +1,9 @@
 package io.github.baslawson.smartnotes
 
+import io.github.baslawson.smartnotes.data.ItemSort
+import io.github.baslawson.smartnotes.data.ListSort
+import io.github.baslawson.smartnotes.data.NoteSort
+import io.github.baslawson.smartnotes.data.TaskSort
 import android.content.SharedPreferences
 import io.github.baslawson.smartnotes.reminders.ReminderSound
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -88,6 +92,32 @@ class AppSettings(private val prefs: SharedPreferences) {
         AppLog.i("Settings", "Date format ${style.name}")
     }
 
+    // ---------- The sort buttons (and which sections have been put in "My order" before) ----------
+
+    private val _noteSort = MutableStateFlow(enumOr(prefs.getString(KEY_NOTE_SORT, null), NoteSort.EDITED))
+    val noteSort: StateFlow<NoteSort> = _noteSort.asStateFlow()
+    private val _taskSort = MutableStateFlow(enumOr(prefs.getString(KEY_TASK_SORT, null), TaskSort.PRIORITY))
+    val taskSort: StateFlow<TaskSort> = _taskSort.asStateFlow()
+    private val _itemSort = MutableStateFlow(enumOr(prefs.getString(KEY_ITEM_SORT, null), ItemSort.ADDED))
+    val itemSort: StateFlow<ItemSort> = _itemSort.asStateFlow()
+    private val _listSort = MutableStateFlow(enumOr(prefs.getString(KEY_LIST_SORT, null), ListSort.DATE))
+    val listSort: StateFlow<ListSort> = _listSort.asStateFlow()
+
+    fun setNoteSort(sort: NoteSort) { prefs.edit().putString(KEY_NOTE_SORT, sort.name).apply(); _noteSort.value = sort }
+    fun setTaskSort(sort: TaskSort) { prefs.edit().putString(KEY_TASK_SORT, sort.name).apply(); _taskSort.value = sort }
+    fun setItemSort(sort: ItemSort) { prefs.edit().putString(KEY_ITEM_SORT, sort.name).apply(); _itemSort.value = sort }
+    fun setListSort(sort: ListSort) { prefs.edit().putString(KEY_LIST_SORT, sort.name).apply(); _listSort.value = sort }
+
+    /**
+     * Whether [section] ("notes", "tasks", "items:<list id>", "lists") has had "My order" before. The first time it is
+     * chosen, the order on screen then becomes its starting order.
+     */
+    fun arranged(section: String): Boolean = section in prefs.getStringSet(KEY_ARRANGED, emptySet()).orEmpty()
+
+    fun setArranged(section: String) {
+        prefs.edit().putStringSet(KEY_ARRANGED, prefs.getStringSet(KEY_ARRANGED, emptySet()).orEmpty() + section).apply()
+    }
+
     fun setReminderSound(sound: ReminderSound) {
         if (sound == ReminderSound.DEFAULT) return
         prefs.edit().putString(KEY_SOUND, sound.name).apply()
@@ -111,6 +141,9 @@ class AppSettings(private val prefs: SharedPreferences) {
     fun export(): Map<String, Any> = mapOf(
         "theme" to theme.value.name, "textScale" to textScale.value.toDouble(), "reminderSound" to reminderSound.value.name,
         "dateStyle" to dateStyle.value.name, "keepFor" to keepFor.value.name,
+        "noteSort" to noteSort.value.name, "taskSort" to taskSort.value.name, "itemSort" to itemSort.value.name,
+        "listSort" to listSort.value.name,
+        "arranged" to prefs.getStringSet(KEY_ARRANGED, emptySet()).orEmpty().sorted().joinToString(","),
     )
 
     /** Takes the settings of a backup being restored; unknown or missing ones are left as they are. */
@@ -120,6 +153,13 @@ class AppSettings(private val prefs: SharedPreferences) {
         (values["reminderSound"] as? String)?.let { name -> ReminderSound.entries.firstOrNull { it.name == name } }?.let(::setReminderSound)
         (values["dateStyle"] as? String)?.let { name -> DateStyle.entries.firstOrNull { it.name == name } }?.let(::setDateStyle)
         (values["keepFor"] as? String)?.let { name -> KeepFor.entries.firstOrNull { it.name == name } }?.let(::setKeepFor)
+        (values["noteSort"] as? String)?.let { name -> NoteSort.entries.firstOrNull { it.name == name } }?.let(::setNoteSort)
+        (values["taskSort"] as? String)?.let { name -> TaskSort.entries.firstOrNull { it.name == name } }?.let(::setTaskSort)
+        (values["itemSort"] as? String)?.let { name -> ItemSort.entries.firstOrNull { it.name == name } }?.let(::setItemSort)
+        (values["listSort"] as? String)?.let { name -> ListSort.entries.firstOrNull { it.name == name } }?.let(::setListSort)
+        // The restored rows carry their own places; which sections were arranged goes with them (none in older backups).
+        val arranged = (values["arranged"] as? String)?.split(',')?.filter { it.isNotBlank() }?.toSet().orEmpty()
+        prefs.edit().putStringSet(KEY_ARRANGED, arranged).apply()
     }
 
     companion object {
@@ -130,6 +170,14 @@ class AppSettings(private val prefs: SharedPreferences) {
         private const val KEY_SOUND = "reminder_sound"
         private const val KEY_DATE = "date_style"
         private const val KEY_KEEP = "bin_keep"
+        private const val KEY_NOTE_SORT = "sort_notes"
+        private const val KEY_TASK_SORT = "sort_tasks"
+        private const val KEY_ITEM_SORT = "sort_items"
+        private const val KEY_LIST_SORT = "sort_lists"
+        private const val KEY_ARRANGED = "arranged"
+
+        private inline fun <reified E : Enum<E>> enumOr(name: String?, default: E): E =
+            enumValues<E>().firstOrNull { it.name == name } ?: default
 
         /** Within 80–160 %, rounded to 10 % steps. */
         fun clampScale(scale: Float): Float =
