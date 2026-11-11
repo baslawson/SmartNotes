@@ -1,12 +1,18 @@
 package io.github.baslawson.smartnotes.data
 
+import java.time.DayOfWeek
 import java.time.LocalDate
 
 /** Notes' sort button. Pinned notes stay on top whatever the order. */
 enum class NoteSort(val label: String) { EDITED("Last edited"), CREATED("Created"), TITLE("Title A–Z"), MINE("My order") }
 
 /** Tasks' sort button (open tasks; done ones stay below, latest done first). */
-enum class TaskSort(val label: String) { PRIORITY("Priority"), DUE("Due date"), NEWEST("Newest"), TITLE("A–Z"), MINE("My order") }
+enum class TaskSort(val label: String) { PRIORITY("Priority"), DUE("Due date"), DAY("By day"), NEWEST("Newest"), TITLE("A–Z"), MINE("My order") }
+
+/** The groups of the "By day" task sort, in the order shown. */
+enum class TaskDay(val label: String) {
+    OVERDUE("Overdue"), TODAY("Today"), TOMORROW("Tomorrow"), WEEK("This week"), LATER("Later"), NONE("No date"),
+}
 
 /** Shopping items' sort button (items to buy; ticked ones stay below, latest ticked first). */
 enum class ItemSort(val label: String) { ADDED("Added"), NAME("A–Z"), MINE("My order") }
@@ -39,12 +45,32 @@ object Sorting {
         val order = when (sort) {
             TaskSort.PRIORITY -> priority
             // Dated first (soonest first; a date without a time counts as 09:00, as its reminder), undated after.
-            TaskSort.DUE -> compareBy<Todo> { it.dueDate == null }.thenBy { it.dueDate }.thenBy { it.dueTime ?: "09:00" }.then(priority)
+            TaskSort.DUE, TaskSort.DAY -> compareBy<Todo> { it.dueDate == null }.thenBy { it.dueDate }.thenBy { it.dueTime ?: "09:00" }.then(priority)
             TaskSort.NEWEST -> compareByDescending<Todo> { it.createdAt }.thenByDescending { it.id }
             TaskSort.TITLE -> compareBy<Todo, String>(text) { it.title }.then(priority)
             TaskSort.MINE -> compareBy<Todo> { it.position }.then(priority)
         }
         return todos.sortedWith(order)
+    }
+
+    /**
+     * Open tasks by day: overdue (a date before [today]), today, tomorrow, the rest of this week (the week starting on
+     * [firstDay]), later, and no date; soonest first within each, as "Due date". Empty groups are left out.
+     */
+    fun taskDays(todos: List<Todo>, today: LocalDate, firstDay: DayOfWeek): List<Pair<TaskDay, List<Todo>>> {
+        val weekEnd = Week.start(today, firstDay).plusDays(6)
+        fun group(t: Todo): TaskDay {
+            val d = t.dueDate?.let { runCatching { LocalDate.parse(it) }.getOrNull() } ?: return TaskDay.NONE
+            return when {
+                d.isBefore(today) -> TaskDay.OVERDUE
+                d == today -> TaskDay.TODAY
+                d == today.plusDays(1) -> TaskDay.TOMORROW
+                !d.isAfter(weekEnd) -> TaskDay.WEEK
+                else -> TaskDay.LATER
+            }
+        }
+        val groups = tasks(todos, TaskSort.DAY).groupBy(::group)
+        return TaskDay.entries.mapNotNull { day -> groups[day]?.let { day to it } }
     }
 
     /** Items still to buy. */

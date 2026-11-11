@@ -4,7 +4,9 @@ import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.performScrollToKey
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -26,8 +28,9 @@ import org.junit.runner.RunWith
 import java.time.LocalDate
 
 /**
- * 0.5.0's quicker input on the emulator: a date typed after a task, swiping a task right (tick) and left (bin), and
- * – / + on a shopping item's quantity. Names carry a run id, since the emulator's data stays between runs.
+ * Quicker input on the emulator: a date typed after a task, swiping a task right (tick) and left (bin), – / + on a
+ * shopping item's quantity (0.5.0); a task's steps and the By day order (0.6.0). Names carry a run id, since the
+ * emulator's data stays between runs.
  */
 @RunWith(AndroidJUnit4::class)
 class InputAndSwipeTest {
@@ -150,6 +153,43 @@ class InputAndSwipeTest {
             compose.onAllNodesWithText("AM")[0].assertExists()
         } finally {
             compose.runOnUiThread { app.settings.setTimeFormat(TimeFormat.PHONE) }
+        }
+    }
+
+    @Test fun tickingAStepCountsIt() {
+        // Newest first, so this run's task is at the top (put back afterwards).
+        app.settings.setTaskSort(io.github.baslawson.smartnotes.data.TaskSort.NEWEST)
+        try { stepsCounted() } finally { app.settings.setTaskSort(io.github.baslawson.smartnotes.data.TaskSort.PRIORITY) }
+    }
+
+    private fun stepsCounted() {
+        runBlocking { app.todos.add("Steps $run", details = "Pack\n- [ ] Passport $run\n- [ ] Tickets $run") }
+        tab("Tasks")
+        until { compose.onAllNodesWithText("☑ 0 of 2", substring = true).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("Steps $run").performClick()
+        until { compose.onAllNodesWithText("Steps · 0 of 2").fetchSemanticsNodes().isNotEmpty() }
+        // Each step's box is named after it (for TalkBack).
+        compose.onNode(androidx.compose.ui.test.isToggleable() and androidx.compose.ui.test.hasContentDescription("Passport $run")).performClick()
+        until { task("Steps $run")?.details == "Pack\n- [x] Passport $run\n- [ ] Tickets $run" }
+        compose.onNodeWithText("Steps · 1 of 2").assertExists()
+        compose.runOnUiThread { compose.activity.onBackPressedDispatcher.onBackPressed() }
+        until { compose.onAllNodesWithText("☑ 1 of 2", substring = true).fetchSemanticsNodes().isNotEmpty() }
+        assertEquals(false, task("Steps $run")!!.done)
+    }
+
+    @Test fun byDayGroupsTasks() {
+        app.settings.setTaskSort(io.github.baslawson.smartnotes.data.TaskSort.DAY)
+        try {
+            val id = runBlocking { app.todos.add("Overdue $run", LocalDate.now().minusDays(3)) }
+            tab("Tasks")
+            until { compose.onAllNodesWithText("Overdue · ", substring = true).fetchSemanticsNodes().isNotEmpty() }
+            // (Earlier runs leave tasks behind: scroll to this one.)
+            compose.onNode(androidx.compose.ui.test.hasScrollToKeyAction()).performScrollToKey("t:$id")
+            compose.onNodeWithText("Overdue $run").assertExists()
+            // No drag handles in this order.
+            assertTrue(compose.onAllNodesWithContentDescription("Drag", substring = true).fetchSemanticsNodes().isEmpty())
+        } finally {
+            app.settings.setTaskSort(io.github.baslawson.smartnotes.data.TaskSort.PRIORITY)
         }
     }
 }

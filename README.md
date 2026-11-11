@@ -29,6 +29,9 @@ One anytime checklist, not linked to notes. Open tasks first (high priority firs
 within a priority), ticked ones below under *Done* (hidden until shown; can be cleared). Tap a task for its details, priority and its own
 reminder: a date and time, its sound, and a repeat (every day / week / month / N days; monthly keeps its day, Jan 31 →
 Feb 28 → Mar 31). Ticking a repeating task moves its reminder to the next time instead.
+**Steps:** write `- [ ] step` lines in a task's details (as in a note's checklist). The task's line in the list shows
+how many are done (☑ 2 of 5); in the task, *Steps* lists them to tick (which changes that line in the details) and
+*Add a step* adds one at the end. Ticking every step doesn't tick the task itself.
 
 A date and time typed at the end of a new task become its reminder: "Call Sam tomorrow 3pm", "Pay rent fri", "Book a
 table on 12 Dec at 19:30", "Dentist in 2 weeks", "Bins out tonight", "Gym 9am" (a time alone is the next one). A chip
@@ -93,7 +96,7 @@ The sort button (three lines) on Notes, Tasks and Shopping picks the order, reme
 | Where | Orders (first is the default) | Kept apart |
 |---|---|---|
 | Notes | Last edited, Created, Title A–Z, My order | pinned notes stay on top |
-| Tasks | Priority, Due date (a date without a time counts as 9:00), Newest, A–Z, My order | done tasks stay below |
+| Tasks | Priority, Due date (a date without a time counts as 9:00), By day (under Overdue, Today, Tomorrow, This week, Later and No date; no dragging), Newest, A–Z, My order | done tasks stay below |
 | Shopping items | Added, A–Z, My order | ticked items stay below |
 
 Each row has a handle (≡): drag it to move the row (pinned notes among the pinned). Dropping it makes the order you

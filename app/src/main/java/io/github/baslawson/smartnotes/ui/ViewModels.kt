@@ -552,6 +552,17 @@ class TodoEditorViewModel(
         }
     }
 
+    /**
+     * Ticks or unticks the step on [line] of the details (saved at once). [seen]: the details that line number was read
+     * from; if they've changed since (the line could now be another step), the tap is ignored.
+     */
+    fun tickStep(line: Int, seen: String) = update {
+        if (it.details != seen) it else it.copy(details = io.github.baslawson.smartnotes.parse.TaskSteps.toggle(it.details, line))
+    }
+
+    /** Adds a step at the end of the details (saved at once). */
+    fun addStep(text: String) = update { it.copy(details = io.github.baslawson.smartnotes.parse.TaskSteps.add(it.details, text)) }
+
     /** Applies [change]; text edits are saved after a pause, everything else at once. */
     fun update(text: Boolean = false, change: (Todo) -> Todo) {
         val current = todo ?: return

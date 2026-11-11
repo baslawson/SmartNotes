@@ -83,6 +83,9 @@ import sh.calvin.reorderable.rememberReorderableLazyListState
 import sh.calvin.reorderable.ReorderableItem
 import io.github.baslawson.smartnotes.data.ItemSort
 import io.github.baslawson.smartnotes.data.TaskSort
+import io.github.baslawson.smartnotes.data.TaskDay
+import androidx.compose.foundation.lazy.LazyItemScope
+import androidx.compose.ui.semantics.heading
 import io.github.baslawson.smartnotes.data.Sorting
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -153,6 +156,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.ui.text.input.TextFieldValue
 import io.github.baslawson.smartnotes.parse.Shopping
 import io.github.baslawson.smartnotes.parse.Search
+import io.github.baslawson.smartnotes.parse.TaskSteps
 import kotlinx.coroutines.delay
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import java.time.LocalTime
@@ -287,6 +291,53 @@ private fun SearchResults(
     }
 }
 
+/**
+ * A task's steps: its details' "- [ ] …" lines, ticked here with their boxes (which changes those lines), and a field
+ * that adds one at the end of the details.
+ */
+@Composable
+private fun TaskStepList(details: String, onTick: (line: Int, seen: String) -> Unit, onAdd: (String) -> Unit) {
+    val steps = TaskSteps.of(details)
+    var new by rememberSaveable { mutableStateOf("") }
+    val add = { if (new.isNotBlank()) { onAdd(new); new = "" } }
+    Column {
+        if (steps.isNotEmpty()) {
+            Text("Steps · ${TaskSteps.progress(details)}", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.semantics { heading() })
+            steps.forEach { step ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    // Named after its step, so TalkBack says which one it ticks ("Send invites, checkbox, not checked").
+                    FunCheckbox(checked = step.done, onCheckedChange = { onTick(step.line, details) },
+                        Modifier.semantics { contentDescription = step.text.ifBlank { "(empty)" } })
+                    Text(
+                        step.text.ifBlank { "(empty)" },
+                        textDecoration = if (step.done) TextDecoration.LineThrough else null,
+                        color = if (step.done) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+                    )
+                }
+            }
+        }
+        OutlinedTextField(
+            new, { new = it }, Modifier.fillMaxWidth(),
+            placeholder = { Text("Add a step") }, singleLine = true,
+            leadingIcon = { Icon(Icons.Default.Add, contentDescription = null) },
+            trailingIcon = { if (new.isNotBlank()) IconButton(onClick = add) { Icon(Icons.Default.Check, contentDescription = "Add the step") } },
+            keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Done),
+            keyboardActions = KeyboardActions(onDone = { add() }),
+        )
+    }
+}
+
+/** A "By day" group's heading, with how many tasks it has; Overdue in the error colour. */
+@Composable
+private fun TaskDayHeader(day: TaskDay, count: Int) {
+    Text(
+        "${day.label} · $count", style = MaterialTheme.typography.labelLarge,
+        color = if (day == TaskDay.OVERDUE) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(start = 20.dp, top = 12.dp, bottom = 4.dp).semantics { heading() },
+    )
+}
+
 @Composable
 private fun Header(text: String) {
     Text(
@@ -307,8 +358,8 @@ fun TasksScreen(vm: TodoViewModel, onOpen: (Long) -> Unit, onBack: () -> Unit, b
     // Only rows on screen can be selected (Select all leaves hidden done tasks alone).
     val shownIds = state.todos.filter { showDone || !it.done }.map { it.id }
     LaunchedEffect(shownIds) { if (state.loaded) selection.keepOnly(shownIds) }
-    // Handles in every order; a drop switches to My order.
-    val canArrange = !selection.active
+    // Handles in every order (a drop switches to My order), but not "By day": its groups follow the dates.
+    val canArrange = !selection.active && sort != TaskSort.DAY
     val party = rememberCelebration()
     val query by vm.searchQuery.collectAsStateWithLifecycle()
     BackHandler(enabled = query != null) { vm.searchQuery.value = null }
@@ -394,11 +445,10 @@ fun TasksScreen(vm: TodoViewModel, onOpen: (Long) -> Unit, onBack: () -> Unit, b
                 val b = (to.key as? String)?.removePrefix("t:")?.toLongOrNull()
                 if (a != null && b != null) order.move(a, b)
             }
-            LazyColumn(Modifier.fillMaxSize(), list, contentPadding = PaddingValues(bottom = 24.dp)) {
-                item(key = "tip") {
-                    OneTimeTip("tasks", "Tap a task to add details, a priority or a reminder. Drag ≡ to reorder; long-press to select.")
-                }
-                items(order.ids.mapNotNull { byId[it] }, key = { "t:${it.id}" }) { t ->
+            // "By day": the open tasks under Overdue, Today, Tomorrow, This week, Later and No date.
+            val today = rememberToday()
+            val days = if (sort == TaskSort.DAY) Sorting.taskDays(open, today, Week.firstDay()) else null
+            val openRow: @Composable LazyItemScope.(Todo) -> Unit = { t ->
                     ReorderableItem(reorder, key = "t:${t.id}", enabled = canArrange) { dragging ->
                         // Swipe right to tick, left to delete.
                         SwipeActions(!selection.active && !dragging, t.done, onTick = { tick(t, true) }, onDelete = { vm.delete(t.id) }) { actions ->
@@ -409,6 +459,20 @@ fun TasksScreen(vm: TodoViewModel, onOpen: (Long) -> Unit, onBack: () -> Unit, b
                             }
                         }
                         }
+                    }
+            }
+            LazyColumn(Modifier.fillMaxSize(), list, contentPadding = PaddingValues(bottom = 24.dp)) {
+                item(key = "tip") {
+                    // (By day has no handles to drag.)
+                    OneTimeTip("tasks", "Tap a task to add details, a priority or a reminder. " +
+                        if (sort == TaskSort.DAY) "Long-press to select." else "Drag ≡ to reorder; long-press to select.")
+                }
+                if (days == null) {
+                    items(order.ids.mapNotNull { byId[it] }, key = { "t:${it.id}" }) { t -> openRow(t) }
+                } else {
+                    days.forEach { (day, tasks) ->
+                        item(key = "d:${day.name}") { TaskDayHeader(day, tasks.size) }
+                        items(tasks, key = { "t:${it.id}" }) { t -> openRow(t) }
                     }
                 }
                 if (done.isNotEmpty()) {
@@ -503,17 +567,18 @@ private fun TodoLine(t: Todo, onCheck: (Boolean) -> Unit, modifier: Modifier, te
             val style = LocalDateStyle.current
             val clock = LocalTimeStyle.current
             val reminder = t.reminder()?.let { at -> "⏰ ${style.dayLabel(at.toLocalDate())} ${clock.format(at.toLocalTime())}" + if (Repeat.of(t.repeat) != Repeat.NONE) " ↻" else "" }
-            // Searching: the part of the details with the match (as typed); otherwise their first line.
+            // Steps in the details ("- [ ] …" lines): how many are done.
+            val steps = TaskSteps.progress(t.details)?.let { "☑ $it" }
+            // Searching: the part of the details with the match (as typed); otherwise their first line that isn't a step.
             val about = if (terms.isNotEmpty() && Search.matches(t.details, terms).isNotEmpty()) Search.snippet(t.details, terms, 60, readable = false)
-                else t.details.lineSequence().firstOrNull { it.isNotBlank() }?.take(60)
+                else TaskSteps.about(t.details)?.take(60)
             // Only the details are highlighted: "Today" in the reminder isn't a match.
             val aboutText = about?.let { highlighted(it, terms) }
-            if (reminder != null || aboutText != null) {
+            if (reminder != null || steps != null || aboutText != null) {
                 Text(
                     buildAnnotatedString {
-                        reminder?.let { append(it) }
-                        if (reminder != null && aboutText != null) append("  ·  ")
-                        aboutText?.let { append(it) }
+                        val parts = listOfNotNull(reminder?.let(::AnnotatedString), steps?.let(::AnnotatedString), aboutText)
+                        parts.forEachIndexed { i, part -> if (i > 0) append("  ·  "); append(part) }
                     },
                     style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -561,6 +626,7 @@ fun TodoEditorScreen(vm: TodoEditorViewModel, setting: ReminderSound, onBack: ()
                 label = { Text("Details") }, minLines = 3,
                 keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
             )
+            TaskStepList(t.details, onTick = vm::tickStep, onAdd = vm::addStep)
             Text("Priority")
             SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
                 listOf(0 to "Low", 1 to "Normal", 2 to "High").forEachIndexed { i, (p, label) ->

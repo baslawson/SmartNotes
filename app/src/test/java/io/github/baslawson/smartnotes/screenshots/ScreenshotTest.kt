@@ -22,6 +22,7 @@ import io.github.baslawson.smartnotes.MainActivity
 import io.github.baslawson.smartnotes.SmartNotesApp
 import io.github.baslawson.smartnotes.ThemeMode
 import io.github.baslawson.smartnotes.data.Todo
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.Rule
 import org.junit.Test
@@ -128,6 +129,36 @@ class ScreenshotTest {
         compose.onNodeWithContentDescription("Close search").performClick()
         compose.onNode(hasSetTextAction()).performTextInput("Call Sam tomorrow 3pm")
         shot("light-9-task-date", "⏰ Tomorrow")
+    }
+
+    /** Tasks by day (Overdue, Today, …) and a task's steps. */
+    @Test fun tasksByDayAndSteps() {
+        val app = app()
+        val today = LocalDate.now()
+        runBlocking {
+            app.todos.add("Renew the passport", today.minusDays(2))
+            app.todos.add("Plan the party", today, java.time.LocalTime.of(18, 0), "For Sam's birthday\n- [x] Book a room\n- [ ] Send invites\n- [ ] Order the cake")
+            app.todos.add("Call the bank", today.plusDays(1))
+            app.todos.add("Dentist", today.plusDays(20))
+            app.todos.add("Read a book")
+            app.settings.setTaskSort(io.github.baslawson.smartnotes.data.TaskSort.DAY)
+        }
+        compose.onNodeWithText("Tasks").performClick()
+        shot("light-10-tasks-by-day", "Overdue · 1")
+        compose.onNodeWithText("☑ 1 of 3", substring = true).assertExists()
+        compose.onNodeWithText("Plan the party").performClick()
+        shot("light-11-task-steps", "Steps · 1 of 3")
+        // Tick a step with its box: the line in the details changes, and the count with it.
+        compose.onNodeWithText("Send invites").assertExists()
+        compose.onAllNodes(androidx.compose.ui.test.isToggleable())[2].performClick()
+        compose.waitUntil(10_000) { compose.onAllNodesWithText("Steps · 2 of 3").fetchSemanticsNodes().isNotEmpty() }
+        compose.waitUntil(10_000) { runBlocking { app.todos.observeAll().first().first { it.title == "Plan the party" }.details.contains("- [x] Send invites") } }
+        // A step added in the field goes at the end of the details.
+        compose.onNodeWithText("Add a step").performTextInput("Buy balloons")
+        compose.onNodeWithContentDescription("Add the step").performClick()
+        compose.waitForIdle()
+        compose.waitUntil(10_000) { runBlocking { app.todos.observeAll().first().first { it.title == "Plan the party" }.details.endsWith("\n- [ ] Buy balloons") } }
+        compose.onNodeWithText("Steps · 2 of 4").assertExists()
     }
 
     @Test fun dark() {
