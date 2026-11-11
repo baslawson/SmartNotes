@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Redrawn by the app after every change (widget/Widgets.kt); Android also asks once an hour, which covers midnight. -->
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    tools:targetApi="31"
     android:description="@string/tasks_widget_description"
     android:initialLayout="@layout/glance_default_loading_layout"
     android:minWidth="180dp"

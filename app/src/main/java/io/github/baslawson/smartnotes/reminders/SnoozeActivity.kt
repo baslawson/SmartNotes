@@ -1,9 +1,9 @@
 package io.github.baslawson.smartnotes.reminders
 
 import android.app.PendingIntent
+import androidx.core.net.toUri
 import android.content.Context
 import android.content.Intent
-import android.net.Uri
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -85,7 +85,7 @@ class SnoozeActivity : ComponentActivity() {
         fun intent(context: Context, c: ReminderContent, missed: Boolean = false): PendingIntent = PendingIntent.getActivity(
             context, Notifications.id(c.kind, c.ownerId, c.at) + 1,
             Intent(context, SnoozeActivity::class.java)
-                .setData(Uri.parse("smartnotes://snooze/${c.kind}/${c.ownerId}/${c.at}"))
+                .setData("smartnotes://snooze/${c.kind}/${c.ownerId}/${c.at}".toUri())
                 .putExtra(EXTRA_KIND, c.kind).putExtra(EXTRA_OWNER, c.ownerId).putExtra(EXTRA_AT, c.at.toString())
                 .putExtra(EXTRA_MISSED, missed)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_HISTORY or Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS),

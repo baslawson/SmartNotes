@@ -1,10 +1,10 @@
 package io.github.baslawson.smartnotes.ui
 
 import android.content.ClipData
+import androidx.core.net.toUri
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
-import android.net.Uri
 import android.provider.Settings
 import android.widget.Toast
 import io.github.baslawson.smartnotes.data.BackupException
@@ -238,7 +238,7 @@ private fun BackupSection(app: SmartNotesApp) {
         val uri = pendingUri ?: return@LaunchedEffect
         if (pending != null) return@LaunchedEffect
         try {
-            pending = backups.read(Uri.parse(uri))
+            pending = backups.read(uri.toUri())
         } catch (e: Exception) {
             pendingUri = null
             toast((e as? BackupException)?.message ?: "Couldn't read that file.")
@@ -346,7 +346,7 @@ private fun installUpdate(context: Context, file: File) {
         if (!context.packageManager.canRequestPackageInstalls()) {
             Toast.makeText(context, "Allow SmartNotes to install updates, then tap Install now again.", Toast.LENGTH_LONG).show()
             context.startActivity(
-                Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${context.packageName}"))
+                Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, "package:${context.packageName}".toUri())
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             )
             return

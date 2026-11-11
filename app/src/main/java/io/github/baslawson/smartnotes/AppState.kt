@@ -1,6 +1,7 @@
 package io.github.baslawson.smartnotes
 
 import android.content.SharedPreferences
+import androidx.core.content.edit
 
 /**
  * Where the app was when it was last used, so it opens there again: the screen (a tab, or a note or task), the Notes
@@ -10,38 +11,38 @@ class AppState(private val prefs: SharedPreferences?) {
     /** "notes", "tasks", "shopping", "note/5" or "todo/7" (see [placeOf]). */
     var place: String
         get() = prefs?.getString(KEY_PLACE, null) ?: NOTES
-        set(value) { if (value != place) prefs?.edit()?.putString(KEY_PLACE, value)?.apply() }
+        set(value) { if (value != place) prefs?.edit { putString(KEY_PLACE, value) } }
 
     var notesQuery: String
         get() = prefs?.getString(KEY_QUERY, null).orEmpty()
-        set(value) { prefs?.edit()?.putString(KEY_QUERY, value)?.apply() }
+        set(value) { prefs?.edit { putString(KEY_QUERY, value) } }
 
     var notesTag: String?
         get() = prefs?.getString(KEY_TAG, null)
-        set(value) { prefs?.edit()?.putString(KEY_TAG, value)?.apply() }
+        set(value) { prefs?.edit { putString(KEY_TAG, value) } }
 
     /** The first item shown and how far into it, for the list [key] ("notes", "tasks", "shopping:3"). */
     fun scroll(key: String): Pair<Int, Int> =
         (prefs?.getInt("$KEY_SCROLL$key", 0) ?: 0) to (prefs?.getInt("$KEY_SCROLL$key:offset", 0) ?: 0)
 
     fun setScroll(key: String, index: Int, offset: Int) {
-        prefs?.edit()?.putInt("$KEY_SCROLL$key", index)?.putInt("$KEY_SCROLL$key:offset", offset)?.apply()
+        prefs?.edit { putInt("$KEY_SCROLL$key", index); putInt("$KEY_SCROLL$key:offset", offset) }
     }
 
     /** One-time tips: a tip once dismissed ("Got it") isn't shown again. Kept through a restore. */
     fun tipSeen(tip: String): Boolean = prefs?.getBoolean("$KEY_TIP$tip", false) ?: false
 
     fun setTipSeen(tip: String) {
-        prefs?.edit()?.putBoolean("$KEY_TIP$tip", true)?.apply()
+        prefs?.edit { putBoolean("$KEY_TIP$tip", true) }
     }
 
     /** After a restore the remembered note, task and scroll positions may point at other things: start afresh. */
     fun forgetPlaces() {
         val p = prefs ?: return
-        p.edit().apply {
+        p.edit {
             remove(KEY_PLACE)
             p.all.keys.filter { it.startsWith(KEY_SCROLL) }.forEach { remove(it) }
-        }.apply()
+        }
     }
 
     companion object {

@@ -1,6 +1,7 @@
 package io.github.baslawson.smartnotes.ui
 
 import androidx.compose.runtime.getValue
+import androidx.core.content.edit
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -876,7 +877,7 @@ class ShoppingViewModel(
         if (day.value != date) selection.clear()
         day.value = date
         shownTimes++
-        prefs?.edit()?.putString(KEY_DAY, date?.toString() ?: ANYTIME)?.apply()
+        prefs?.edit { putString(KEY_DAY, date?.toString() ?: ANYTIME) }
     }
 
     /** Shows the day of list [id] (from its reminder), once the lists are read. */

@@ -1,6 +1,7 @@
 package io.github.baslawson.smartnotes
 
 import android.Manifest
+import androidx.core.content.edit
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -449,7 +450,7 @@ private fun AskForNotifications() {
     LaunchedEffect(Unit) {
         val prefs = context.getSharedPreferences("app", android.content.Context.MODE_PRIVATE)
         if (!Notifications.canNotify(context) && !prefs.getBoolean("askedNotifications", false)) {
-            prefs.edit().putBoolean("askedNotifications", true).apply()
+            prefs.edit { putBoolean("askedNotifications", true) }
             launcher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
     }

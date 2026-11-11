@@ -1,6 +1,7 @@
 package io.github.baslawson.smartnotes
 
 import android.app.Application
+import androidx.core.content.edit
 import androidx.core.content.pm.PackageInfoCompat
 import io.github.baslawson.smartnotes.data.Backups
 import io.github.baslawson.smartnotes.data.NoteDatabase
@@ -43,7 +44,7 @@ class SmartNotesApp : Application() {
     val backups by lazy {
         Backups(this, database, settings, alarms, { versionName }, onRestored = {
             state.forgetPlaces()
-            getSharedPreferences("lists", MODE_PRIVATE).edit().remove("shopping_list").apply()
+            getSharedPreferences("lists", MODE_PRIVATE).edit { remove("shopping_list") }
         })
     }
     /** Where the app was last (screen, search, scrolling), to open there again. */
@@ -89,7 +90,7 @@ class SmartNotesApp : Application() {
                     androidx.work.WorkManager.getInstance(this@SmartNotesApp)
                         .cancelAllWorkByTag("io.github.baslawson.smartnotes.reminders.ReminderWorker")
                 }
-                prefs.edit().putLong("scheduledFor", version).apply()
+                prefs.edit { putLong("scheduledFor", version) }
             }
             // The first start since the phone restarted applies the restart rules (missed, not rung late), whether it
             // comes before or after BOOT_COMPLETED (which can come long after, at the first unlock).
@@ -99,7 +100,7 @@ class SmartNotesApp : Application() {
             // Nothing saved yet (the first start of this version): only counts as a restart soon after one.
             val firstSinceBoot = if (bootCount >= 0) saved != bootCount && (saved >= 0 || soonAfterBoot) else soonAfterBoot
             alarms.restoreAll(boot = firstSinceBoot)
-            if (bootCount >= 0) prefs.edit().putInt("restoredBoot", bootCount).apply()
+            if (bootCount >= 0) prefs.edit { putInt("restoredBoot", bootCount) }
             bin.purge()
             backups.schedule()
         }

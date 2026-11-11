@@ -16,8 +16,8 @@ android {
         applicationId = "io.github.baslawson.smartnotes"
         minSdk = 26 // java.time works natively from API 26
         targetSdk = 36 // Android 16, as on the Samsung Galaxy S26
-        versionCode = 19
-        versionName = "0.9.0"
+        versionCode = 20
+        versionName = "0.9.1"
         // Instrumented UI tests (app/src/androidTest) run on the devbox emulator, never a phone: real swipes and taps.
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

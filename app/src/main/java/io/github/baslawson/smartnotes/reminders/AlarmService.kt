@@ -1,6 +1,7 @@
 package io.github.baslawson.smartnotes.reminders
 
 import android.app.PendingIntent
+import androidx.core.net.toUri
 import android.app.Service
 import android.content.Context
 import android.content.Intent
@@ -111,6 +112,8 @@ class AlarmService : Service() {
         stopEverything()
     }
 
+    // The media type only counts from Android 10; ServiceCompat leaves it out before that (the constant is just an int).
+    @android.annotation.SuppressLint("InlinedApi")
     private fun goForeground(shown: android.app.Notification): Boolean = try {
         ServiceCompat.startForeground(this, NOTIFICATION_ID, shown, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
         true
@@ -264,7 +267,7 @@ class AlarmService : Service() {
         private fun stopIntent(context: Context, token: String?): PendingIntent = PendingIntent.getService(
             context, 1,
             Intent(context, AlarmService::class.java).setAction(ACTION_STOP)
-                .setData(Uri.parse("smartnotes://alarm-stop/${token.orEmpty()}")).putExtra(EXTRA_STOP_TOKEN, token)
+                .setData("smartnotes://alarm-stop/${token.orEmpty()}".toUri()).putExtra(EXTRA_STOP_TOKEN, token)
                 .putExtra(EXTRA_KEEP, true),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )

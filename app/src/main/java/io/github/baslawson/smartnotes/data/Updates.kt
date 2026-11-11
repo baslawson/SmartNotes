@@ -1,6 +1,7 @@
 package io.github.baslawson.smartnotes.data
 
 import android.content.Context
+import androidx.core.content.edit
 import android.content.SharedPreferences
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -153,15 +154,15 @@ class Updates(
 
     private val lock = Mutex()
 
-    fun setCheckOnStart(on: Boolean) { prefs.edit().putBoolean(KEY_ON_START, on).apply(); _checkOnStart.value = on }
-    fun setAutoDownload(on: Boolean) { prefs.edit().putBoolean(KEY_AUTO_DOWNLOAD, on).apply(); _autoDownload.value = on }
+    fun setCheckOnStart(on: Boolean) { prefs.edit { putBoolean(KEY_ON_START, on) }; _checkOnStart.value = on }
+    fun setAutoDownload(on: Boolean) { prefs.edit { putBoolean(KEY_AUTO_DOWNLOAD, on) }; _autoDownload.value = on }
 
     // When SmartNotes starts: a check if it's switched on and the last one was a day or more ago.
     suspend fun checkIfDue() {
         if (!supported || !_checkOnStart.value || now() - lastChecked < DAY_MS) return
         // A failed check doesn't count as checked, but still waits an hour, so GitHub isn't asked at every start.
         if (now() - prefs.getLong(KEY_LAST_ATTEMPT, 0L) < HOUR_MS) return
-        prefs.edit().putLong(KEY_LAST_ATTEMPT, now()).apply()
+        prefs.edit { putLong(KEY_LAST_ATTEMPT, now()) }
         check(fromSettings = false)
     }
 
@@ -185,7 +186,7 @@ class Updates(
                 _state.value = ready ?: if (fromSettings) State.Failed((e as? UpdateException)?.message ?: "Couldn't check for updates. Check the connection.") else State.Idle
                 return
             }
-            prefs.edit().putLong(KEY_LAST, now()).apply()
+            prefs.edit { putLong(KEY_LAST, now()) }
             AppLog.i("Updates", "Checked: latest release ${release?.version ?: "none with SmartNotes.apk"}, installed $installed")
             // A latest release without SmartNotes.apk yet (its files still uploading) says nothing new, and keeps
             // a download already made rather than deleting it.
@@ -223,9 +224,9 @@ class Updates(
                     if (!part.renameTo(file)) throw UpdateException("The update couldn't be saved.")
                 }
                 // Downloading a version undoes skipping it (Check now offers a skipped one again).
-                if (prefs.getString(KEY_SKIPPED, null) == release.version) prefs.edit().remove(KEY_SKIPPED).apply()
-                prefs.edit().putString(KEY_READY, JSONObject().put("version", release.version).put("notes", release.notes)
-                    .put("apk", release.apkUrl).put("sha", release.shaUrl).put("page", release.page).put("hash", expected).toString()).apply()
+                if (prefs.getString(KEY_SKIPPED, null) == release.version) prefs.edit { remove(KEY_SKIPPED) }
+                prefs.edit { putString(KEY_READY, JSONObject().put("version", release.version).put("notes", release.notes)
+                    .put("apk", release.apkUrl).put("sha", release.shaUrl).put("page", release.page).put("hash", expected).toString()) }
                 _state.value = State.Ready(release, file, expected)
                 AppLog.i("Updates", "Downloaded and checked ${release.version}")
                 // Older versions' files and a .part left by a download Android cut off go.
@@ -247,13 +248,13 @@ class Updates(
     suspend fun stillReady(): Boolean {
         val ready = _state.value as? State.Ready ?: return false
         if (ready.file.isFile && runCatching { sha256(ready.file) }.getOrNull() == ready.hash) return true
-        ready.file.delete(); prefs.edit().remove(KEY_READY).apply()
+        ready.file.delete(); prefs.edit { remove(KEY_READY) }
         _state.value = State.Failed("The downloaded update is gone or damaged. Download it again.", ready.release)
         return false
     }
 
     fun skip(release: AppRelease) {
-        prefs.edit().putString(KEY_SKIPPED, release.version).apply()
+        prefs.edit { putString(KEY_SKIPPED, release.version) }
         _dismissed.value = true
         _state.value = State.Idle
         cleanUp()
@@ -262,7 +263,7 @@ class Updates(
     // Downloads of older (or already installed) versions are of no use.
     private fun cleanUp() {
         val keep = (_state.value as? State.Ready)?.file
-        if (keep == null) prefs.edit().remove(KEY_READY).apply()
+        if (keep == null) prefs.edit { remove(KEY_READY) }
         folder.listFiles()?.forEach { if (it != keep) it.delete() }
     }
 
@@ -274,7 +275,7 @@ class Updates(
         val file = File(folder, "SmartNotes-${release.version}.apk")
         val hash = o.optString("hash")
         if (!supported || !AppVersion.newer(release.version, installed) || !file.isFile || AppVersion.sha256Of(hash) == null) {
-            prefs.edit().remove(KEY_READY).apply(); folder.listFiles()?.forEach { it.delete() }; return null
+            prefs.edit { remove(KEY_READY) }; folder.listFiles()?.forEach { it.delete() }; return null
         }
         // A .part from a download cut off by the restart, or an older version's file, is of no use.
         folder.listFiles()?.forEach { if (it != file) it.delete() }

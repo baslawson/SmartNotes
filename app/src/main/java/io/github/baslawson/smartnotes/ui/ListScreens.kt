@@ -837,8 +837,10 @@ fun ShoppingScreen(
             // Staples not on the list yet (still to buy): one tap adds them all.
             val onList = open.map { it.key }.toSet() + anytimeOpen.map { it.key }
             val missing = staples.count { it.key !in onList }
-            // Only once the day shown has its items in (not the last day's, just after switching).
-            if (state.loaded && state.itemsOf == listId && missing > 0 && !selection.active) {
+            // Only once the day shown has its items in (not the last day's, just after switching): the list worked out
+            // from the day on screen now, as the view model does (Anytime 1, a day without a list 0).
+            val shownListId = day?.let { d -> state.lists.firstOrNull { it.date == d.toString() }?.id ?: 0L } ?: 1L
+            if (state.loaded && state.itemsOf == shownListId && missing > 0 && !selection.active) {
                 TextButton(onClick = { vm.addStaples() }, Modifier.padding(start = 8.dp)) {
                     Icon(Icons.Default.Star, contentDescription = null, Modifier.size(18.dp))
                     Text("Add staples ($missing)", Modifier.padding(start = 6.dp))

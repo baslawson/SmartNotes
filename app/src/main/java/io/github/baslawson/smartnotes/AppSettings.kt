@@ -1,6 +1,7 @@
 package io.github.baslawson.smartnotes
 
 import io.github.baslawson.smartnotes.data.ItemSort
+import androidx.core.content.edit
 import io.github.baslawson.smartnotes.data.ListSort
 import io.github.baslawson.smartnotes.data.NoteSort
 import io.github.baslawson.smartnotes.data.TaskSort
@@ -109,7 +110,7 @@ class AppSettings(private val prefs: SharedPreferences) {
     val keepFor: StateFlow<KeepFor> = _keepFor.asStateFlow()
 
     fun setKeepFor(keep: KeepFor) {
-        prefs.edit().putString(KEY_KEEP, keep.name).apply()
+        prefs.edit { putString(KEY_KEEP, keep.name) }
         _keepFor.value = keep
         AppLog.i("Settings", "Recycle bin keeps ${keep.label}")
     }
@@ -118,7 +119,7 @@ class AppSettings(private val prefs: SharedPreferences) {
     val dateStyle: StateFlow<DateStyle> = _dateStyle.asStateFlow()
 
     fun setDateStyle(style: DateStyle) {
-        prefs.edit().putString(KEY_DATE, style.name).apply()
+        prefs.edit { putString(KEY_DATE, style.name) }
         _dateStyle.value = style
         AppLog.i("Settings", "Date format ${style.name}")
     }
@@ -127,7 +128,7 @@ class AppSettings(private val prefs: SharedPreferences) {
     val timeFormat: StateFlow<TimeFormat> = _timeFormat.asStateFlow()
 
     fun setTimeFormat(format: TimeFormat) {
-        prefs.edit().putString(KEY_TIME, format.name).apply()
+        prefs.edit { putString(KEY_TIME, format.name) }
         _timeFormat.value = format
         AppLog.i("Settings", "Time format ${format.name}")
     }
@@ -153,15 +154,15 @@ class AppSettings(private val prefs: SharedPreferences) {
     private val _noteGrid = MutableStateFlow(prefs.getBoolean(KEY_NOTE_GRID, false))
     val noteGrid: StateFlow<Boolean> = _noteGrid.asStateFlow()
 
-    fun setNoteGrid(grid: Boolean) { prefs.edit().putBoolean(KEY_NOTE_GRID, grid).apply(); _noteGrid.value = grid }
+    fun setNoteGrid(grid: Boolean) { prefs.edit { putBoolean(KEY_NOTE_GRID, grid) }; _noteGrid.value = grid }
 
-    fun setShowDoneTasks(show: Boolean) { prefs.edit().putBoolean(KEY_SHOW_DONE, show).apply(); _showDoneTasks.value = show }
-    fun setShowTickedItems(show: Boolean) { prefs.edit().putBoolean(KEY_SHOW_TICKED, show).apply(); _showTickedItems.value = show }
+    fun setShowDoneTasks(show: Boolean) { prefs.edit { putBoolean(KEY_SHOW_DONE, show) }; _showDoneTasks.value = show }
+    fun setShowTickedItems(show: Boolean) { prefs.edit { putBoolean(KEY_SHOW_TICKED, show) }; _showTickedItems.value = show }
 
-    fun setNoteSort(sort: NoteSort) { prefs.edit().putString(KEY_NOTE_SORT, sort.name).apply(); _noteSort.value = sort }
-    fun setTaskSort(sort: TaskSort) { prefs.edit().putString(KEY_TASK_SORT, sort.name).apply(); _taskSort.value = sort }
-    fun setItemSort(sort: ItemSort) { prefs.edit().putString(KEY_ITEM_SORT, sort.name).apply(); _itemSort.value = sort }
-    fun setListSort(sort: ListSort) { prefs.edit().putString(KEY_LIST_SORT, sort.name).apply(); _listSort.value = sort }
+    fun setNoteSort(sort: NoteSort) { prefs.edit { putString(KEY_NOTE_SORT, sort.name) }; _noteSort.value = sort }
+    fun setTaskSort(sort: TaskSort) { prefs.edit { putString(KEY_TASK_SORT, sort.name) }; _taskSort.value = sort }
+    fun setItemSort(sort: ItemSort) { prefs.edit { putString(KEY_ITEM_SORT, sort.name) }; _itemSort.value = sort }
+    fun setListSort(sort: ListSort) { prefs.edit { putString(KEY_LIST_SORT, sort.name) }; _listSort.value = sort }
 
     /**
      * Whether [section] ("notes", "tasks", "items:<list id>", "lists") has had "My order" before. The first time it is
@@ -170,25 +171,25 @@ class AppSettings(private val prefs: SharedPreferences) {
     fun arranged(section: String): Boolean = section in prefs.getStringSet(KEY_ARRANGED, emptySet()).orEmpty()
 
     fun setArranged(section: String) {
-        prefs.edit().putStringSet(KEY_ARRANGED, prefs.getStringSet(KEY_ARRANGED, emptySet()).orEmpty() + section).apply()
+        prefs.edit { putStringSet(KEY_ARRANGED, prefs.getStringSet(KEY_ARRANGED, emptySet()).orEmpty() + section) }
     }
 
     fun setReminderSound(sound: ReminderSound) {
         if (sound == ReminderSound.DEFAULT) return
-        prefs.edit().putString(KEY_SOUND, sound.name).apply()
+        prefs.edit { putString(KEY_SOUND, sound.name) }
         _reminderSound.value = sound
         AppLog.i("Settings", "Reminder sound ${sound.label}")
     }
 
     fun setTheme(mode: ThemeMode) {
-        prefs.edit().putString(KEY_THEME, mode.name).apply()
+        prefs.edit { putString(KEY_THEME, mode.name) }
         _theme.value = mode
         AppLog.i("Settings", "Theme ${mode.label}")
     }
 
     fun setTextScale(scale: Float) {
         val s = clampScale(scale)
-        prefs.edit().putFloat(KEY_TEXT_SCALE, s).apply()
+        prefs.edit { putFloat(KEY_TEXT_SCALE, s) }
         _textScale.value = s
     }
 
@@ -219,7 +220,7 @@ class AppSettings(private val prefs: SharedPreferences) {
         (values["noteGrid"] as? Boolean)?.let(::setNoteGrid)
         // The restored rows carry their own places; which sections were arranged goes with them (none in older backups).
         val arranged = (values["arranged"] as? String)?.split(',')?.filter { it.isNotBlank() }?.toSet().orEmpty()
-        prefs.edit().putStringSet(KEY_ARRANGED, arranged).apply()
+        prefs.edit { putStringSet(KEY_ARRANGED, arranged) }
     }
 
     companion object {

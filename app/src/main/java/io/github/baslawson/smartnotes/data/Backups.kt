@@ -1,6 +1,8 @@
 package io.github.baslawson.smartnotes.data
 
 import android.content.Context
+import androidx.core.net.toUri
+import androidx.core.content.edit
 import android.content.Intent
 import android.net.Uri
 import android.provider.DocumentsContract
@@ -149,15 +151,15 @@ class Backups(
         // The new folder's permission first: if it can't be had, the old folder stays as it was.
         if (uri != null) context.contentResolver.takePersistableUriPermission(uri, RW)
         if (old != null && old != uri?.toString()) {
-            runCatching { context.contentResolver.releasePersistableUriPermission(Uri.parse(old), RW) }
+            runCatching { context.contentResolver.releasePersistableUriPermission(old.toUri(), RW) }
         }
-        prefs.edit().putString(KEY_FOLDER, uri?.toString()).putString(KEY_FOLDER_NAME, name).remove(KEY_ERROR).apply()
+        prefs.edit { putString(KEY_FOLDER, uri?.toString()); putString(KEY_FOLDER_NAME, name); remove(KEY_ERROR) }
         _status.value = readStatus()
         schedule(replace = true)
     }
 
     fun setAuto(auto: AutoBackup) {
-        prefs.edit().putString(KEY_AUTO, auto.name).apply()
+        prefs.edit { putString(KEY_AUTO, auto.name) }
         _status.value = readStatus()
         schedule(replace = true)
         AppLog.i("Backup", "Automatic backup ${auto.label}")
@@ -202,13 +204,13 @@ class Backups(
                     runCatching { DocumentsContract.deleteDocument(resolver, DocumentsContract.buildDocumentUriUsingTree(folder, found.getValue(name))) }
                 }
             }
-            prefs.edit().putLong(KEY_LAST, clock.millis()).remove(KEY_ERROR).apply()
+            prefs.edit { putLong(KEY_LAST, clock.millis()); remove(KEY_ERROR) }
             AppLog.i("Backup", "Automatic backup: ${data.summary()}")
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             val message = (e as? BackupException)?.message ?: "The backup folder can't be used (moved or removed?). Choose it again."
-            prefs.edit().putString(KEY_ERROR, message).apply()
+            prefs.edit { putString(KEY_ERROR, message) }
             AppLog.w("Backup", "Automatic backup failed", e)
         }
         _status.value = readStatus()

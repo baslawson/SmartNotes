@@ -1,6 +1,7 @@
 package io.github.baslawson.smartnotes.reminders
 
 import android.Manifest
+import androidx.core.net.toUri
 import android.app.AlarmManager
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -9,7 +10,6 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.net.Uri
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -204,7 +204,7 @@ class AlarmScheduler(private val context: Context, private val db: NoteDatabase,
     private fun pending(id: Long, flag: Int): PendingIntent? = PendingIntent.getBroadcast(
         context, id.toInt(),
         // The data makes each alarm its own; extras don't take part in matching.
-        Intent(context, ReminderReceiver::class.java).setData(Uri.parse("smartnotes://alarm/$id")).putExtra(EXTRA_ALARM_ID, id),
+        Intent(context, ReminderReceiver::class.java).setData("smartnotes://alarm/$id".toUri()).putExtra(EXTRA_ALARM_ID, id),
         flag or PendingIntent.FLAG_IMMUTABLE,
     )
 
@@ -276,7 +276,7 @@ class ReminderActionReceiver : BroadcastReceiver() {
         fun done(context: Context, c: ReminderContent): PendingIntent = PendingIntent.getBroadcast(
             context, Notifications.id(c.kind, c.ownerId, c.at),
             Intent(context, ReminderActionReceiver::class.java)
-                .setData(Uri.parse("smartnotes://done/${c.kind}/${c.ownerId}/${c.at}"))
+                .setData("smartnotes://done/${c.kind}/${c.ownerId}/${c.at}".toUri())
                 .putExtra(EXTRA_KIND, c.kind).putExtra(EXTRA_OWNER, c.ownerId).putExtra(EXTRA_AT, c.at.toString()),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
@@ -301,6 +301,8 @@ class BootReceiver : BroadcastReceiver() {
     }
 
     private companion object {
+        // The exact-alarm permission broadcast is only sent from Android 12; before that the name never arrives.
+        @android.annotation.SuppressLint("InlinedApi")
         val ACTIONS = setOf(
             Intent.ACTION_BOOT_COMPLETED, Intent.ACTION_MY_PACKAGE_REPLACED, Intent.ACTION_TIME_CHANGED,
             Intent.ACTION_TIMEZONE_CHANGED, AlarmManager.ACTION_SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED,
@@ -343,7 +345,7 @@ object Notifications {
         PendingIntent.getActivity(
             context, requestCode,
             Intent(context, MainActivity::class.java)
-                .setData(Uri.parse("smartnotes://open/$requestCode/${stopToken.orEmpty()}"))
+                .setData("smartnotes://open/$requestCode/${stopToken.orEmpty()}".toUri())
                 .putExtra(MainActivity.EXTRA_ROUTE, route)
                 .putExtra(AlarmService.EXTRA_STOP_TOKEN, stopToken)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP),
