@@ -14,7 +14,10 @@ Everything "smart" in a note is read from its plain text, so the text stays the 
 | `- [ ] buy milk` / `- [x] done` | a checkbox, ticked from the note's *Checklist* (it stays in the note; it isn't a to-do task) |
 
 Also: full-text search (Room FTS4, word prefixes, matches highlighted), related notes (shared tags and words), and
-**Share → SmartNotes** from other apps (text or a link becomes a new note; the subject is its title).
+**Share → SmartNotes** from other apps: a small dialog asks what the text or link becomes. *A note* (the subject is its
+title), *A task* (the subject or first line is its title, the rest its details; no reminder is read from shared words) or
+*Shopping for today* (each line of the text an item; bullets, boxes and "1." numbering left off). *Cancel* or Back
+keeps nothing; a tap beside the dialog doesn't.
 **+** opens a new note with the cursor in its text and the keyboard up.
 The button left of sort (four squares) shows notes as a **grid** of cards, each as tall as its note (two columns on a
 phone, more on a wider screen), with a longer preview; the list button switches back. The choice is remembered and
@@ -26,6 +29,14 @@ One anytime checklist, not linked to notes. Open tasks first (high priority firs
 within a priority), ticked ones below under *Done* (hidden until shown; can be cleared). Tap a task for its details, priority and its own
 reminder: a date and time, its sound, and a repeat (every day / week / month / N days; monthly keeps its day, Jan 31 →
 Feb 28 → Mar 31). Ticking a repeating task moves its reminder to the next time instead.
+
+A date and time typed at the end of a new task become its reminder: "Call Sam tomorrow 3pm", "Pay rent fri", "Book a
+table on 12 Dec at 19:30", "Dentist in 2 weeks", "Bins out tonight", "Gym 9am" (a time alone is the next one). A chip
+under the box shows what it will set (⏰ Tomorrow 3:00 PM; "passed, won't remind" for a moment already gone by); its ✕ keeps the words in the title instead. Only words at
+the end count, so "Buy sun cream" isn't Sunday; a date alone reminds at 9:00. English words only.
+
+**Swipe** a task or shopping item right to tick it (a ticked one: untick it), left to delete it (with *Undo*), as
+TalkBack's actions too. Not while selecting.
 
 On the right of the add box: ✓ adds what is typed, 🔍 searches all tasks (starting with what is typed, if anything).
 Every word typed must start a word in the task's title or details, capitals ignored ("den call" finds "Call the
@@ -43,7 +54,8 @@ day shown is filled, and a dot marks each day with something still to buy. Swipe
 tick off in the shop too. ✎ sets the day's reminder (with its sound), moves its list to another day (one list per
 day), or deletes it. Anytime can't be deleted.
 
-Type `2x milk`, `milk 2L` or `eggs x12`: the quantity shows apart from the name. Tap an item to rename it or change its
+Type `2x milk`, `milk 2L` or `eggs x12`: the quantity shows apart from the name; tap a count (`2x`, `3 packs`) for **− / +**
+(one less or more; below 1 the quantity goes; weights and volumes like `500g` or `2L` don't step). Tap an item to rename it or change its
 quantity (suggestions follow the new name); a name already on that list isn't taken twice. Past items pop up under the
 box while typing, the typed letters in bold (tap one to add it, ✕ forgets it), and an item already on the list isn't
 added twice. The reminder lists what is still to buy. **Long-press items** to select them (tap more to add), then
@@ -133,7 +145,9 @@ any still set are cancelled).
 ## Settings
 
 Version; theme (System / Light / Dark); text size (80–160 %, on top of the phone's own font size); date format
-(12/11/2026, Wed 12 Nov, 11/12/2026 or 2026-11-12, for shopping lists and tasks); reminder sound
+(12/11/2026, Wed 12 Nov, 11/12/2026 or 2026-11-12, for shopping lists and tasks); **time format** (the phone's setting,
+12-hour 3:30 PM or 24-hour 15:30: every time shown, the time pickers and notifications; kept in backups; after changing the phone's own
+setting, reopen SmartNotes to pick it up); reminder sound
 and *Test alarm*; the recycle bin; backup; updates from GitHub; the debug log. Every screen but Notes has a back arrow.
 
 ## Updates
@@ -168,6 +182,8 @@ Needs JDK 17+ and the Android SDK (platform 36). `local.properties` holds `sdk.d
 ./gradlew testDebugUnitTest --tests '*ScreenshotTest*'
                                # draws the real screens with sample data (Robolectric), light and dark,
                                # to app/build/screenshots/*.png: for looking at a design change, not compared
+./gradlew connectedDebugAndroidTest
+                               # on an emulator (ANDROID_SERIAL=emulator-5554): real swipes and taps (app/src/androidTest)
 ./gradlew assembleRelease      # signed when keystore.properties exists (git-ignored):
                                # storeFile=…, storePassword=…, keyAlias=…, keyPassword=…
 ```

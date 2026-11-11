@@ -16,8 +16,10 @@ android {
         applicationId = "io.github.baslawson.smartnotes"
         minSdk = 26 // java.time works natively from API 26
         targetSdk = 36 // Android 16, as on the Samsung Galaxy S26
-        versionCode = 14
-        versionName = "0.4.2"
+        versionCode = 15
+        versionName = "0.5.0"
+        // Instrumented UI tests (app/src/androidTest) run on the devbox emulator, never a phone: real swipes and taps.
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     // The release key lives outside the repository. keystore.properties (git-ignored) points at it;
@@ -90,4 +92,11 @@ dependencies {
     testImplementation(libs.roborazzi.compose)
     testImplementation(platform(libs.androidx.compose.bom))
     testImplementation(libs.androidx.compose.ui.test.junit4)
+
+    // On the emulator (app/src/androidTest): gestures Robolectric can't run, such as a pager that slides.
+    androidTestImplementation(platform(libs.androidx.compose.bom))
+    androidTestImplementation(libs.androidx.compose.ui.test.junit4)
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.test.ext.junit)
+    androidTestImplementation(libs.androidx.test.rules)
 }

@@ -60,7 +60,8 @@ class ReminderRulesTest {
         assertEquals(t("2026-11-12T09:00"), SnoozeChoice.TOMORROW.until(evening))
         // In the small hours "tomorrow" is the coming morning.
         assertEquals(t("2026-11-11T09:00"), SnoozeChoice.TOMORROW.until(t("2026-11-11T01:30")))
-        assertEquals("This morning at 9 am", SnoozeChoice.TOMORROW.label(t("2026-11-11T01:30")))
+        assertEquals("This morning at 9:00 AM", SnoozeChoice.TOMORROW.label(t("2026-11-11T01:30"), io.github.baslawson.smartnotes.TimeStyle(false)))
+        assertEquals("Tomorrow at 09:00", SnoozeChoice.TOMORROW.label(t("2026-11-11T10:30"), io.github.baslawson.smartnotes.TimeStyle(true)))
     }
 
     @Test fun soundResolvesDefault() {

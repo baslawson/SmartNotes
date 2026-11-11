@@ -127,7 +127,7 @@ class AlarmService : Service() {
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(c.title)
             .setContentText(c.text)
-            .setSubText(Notifications.whenText(c.at))
+            .setSubText(Notifications.whenText(c.at, io.github.baslawson.smartnotes.TimeStyle.of(this)))
             .setStyle(NotificationCompat.BigTextStyle().bigText(c.text))
             .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setPriority(NotificationCompat.PRIORITY_MAX)

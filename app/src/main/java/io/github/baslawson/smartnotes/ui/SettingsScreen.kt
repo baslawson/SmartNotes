@@ -167,6 +167,14 @@ private fun AppearanceSection(settings: AppSettings) {
         { it.format(today) }, settings::setDateStyle,
     )
     Hint("For shopping lists and task dates. Today, Tomorrow and Yesterday are still written out.")
+    val timeFormat by settings.timeFormat.collectAsStateWithLifecycle()
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val sample = remember { java.time.LocalTime.of(15, 30) }
+    ChoiceRow(
+        "Time format", timeFormat.label + " (" + timeFormat.style(context).format(sample) + ")", io.github.baslawson.smartnotes.TimeFormat.entries,
+        { it.label + " (" + it.style(context).format(sample) + ")" }, settings::setTimeFormat,
+    )
+    Hint("For reminders, the time pickers and notifications. Typing \"3pm\" or \"15:00\" works either way.")
 }
 
 // ---------- Recycle bin ----------
@@ -268,7 +276,7 @@ private fun BackupSection(app: SmartNotesApp) {
         status.auto != AutoBackup.OFF && status.folder == null -> Hint("Choose a folder for the automatic backups.")
         status.lastError != null -> Text(status.lastError!!, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
         status.lastAt > 0 -> Hint("Last backup: " + java.time.Instant.ofEpochMilli(status.lastAt).atZone(java.time.ZoneId.systemDefault()).let {
-            style.dayLabel(it.toLocalDate()) + " " + it.toLocalTime().withSecond(0).withNano(0)
+            style.dayLabel(it.toLocalDate()) + " " + io.github.baslawson.smartnotes.ui.LocalTimeStyle.current.format(it.toLocalTime())
         })
     }
     if (status.auto != AutoBackup.OFF) Hint("The newest 5 automatic backups are kept in that folder; older ones are removed.")

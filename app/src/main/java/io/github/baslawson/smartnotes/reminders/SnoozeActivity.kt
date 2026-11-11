@@ -57,9 +57,9 @@ class SnoozeActivity : ComponentActivity() {
                                     Notifications.cancel(this@SnoozeActivity, kind, ownerId, at)
                                     if (kind != "test") app.appScope.launch { app.alarms.snooze(kind, ownerId, at, until) }
                                     else AppLog.i("Reminders", "Test alarm snoozed (nothing to remind)")
-                                    Toast.makeText(this@SnoozeActivity, "Snoozed: ${choice.label(now)}", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(this@SnoozeActivity, "Snoozed: ${choice.label(now, io.github.baslawson.smartnotes.TimeStyle.of(this@SnoozeActivity))}", Toast.LENGTH_SHORT).show()
                                     finish()
-                                }) { Text(choice.label(now)) }
+                                }) { Text(choice.label(now, io.github.baslawson.smartnotes.TimeStyle.of(this@SnoozeActivity))) }
                             }
                         }
                     },

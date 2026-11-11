@@ -54,6 +54,16 @@ class ShoppingRepository(
         done
     }
 
+    /**
+     * One more or less of an item ("2x" → "3x"; see Shopping.step), from its quantity as stored now: taps on – or +
+     * quicker than the screen updates each still count.
+     */
+    suspend fun step(id: Long, delta: Int) = lock.withLock {
+        val item = dao.item(id) ?: return@withLock
+        val q = Shopping.step(item.quantity, delta) ?: return@withLock
+        dao.renameItem(item.id, item.key, item.name, q, clock.millis())
+    }
+
     suspend fun setChecked(item: ShoppingItem, checked: Boolean) = lock.withLock {
         dao.setChecked(item.id, checked, if (checked) clock.millis() else 0)
     }

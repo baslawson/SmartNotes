@@ -2,6 +2,16 @@ package io.github.baslawson.smartnotes.ui
 
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.Alignment
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
@@ -138,4 +148,73 @@ fun RowCard(
         },
         content = content,
     )
+}
+
+/**
+ * A list row you can swipe: right to tick (or untick) it, left to delete it ([onDelete] offers Undo). The row springs
+ * back after a tick; a deleted row leaves the list. Off while selecting ([enabled]). TalkBack gets the same two as actions.
+ */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+fun SwipeActions(
+    enabled: Boolean,
+    ticked: Boolean,
+    onTick: () -> Unit,
+    onDelete: () -> Unit,
+    content: @Composable (actions: Modifier) -> Unit,
+) {
+    val state = androidx.compose.material3.rememberSwipeToDismissBoxState(positionalThreshold = { it * 0.35f })
+    // The state is saved with the row's key: a row swiped away and brought back by Undo comes back still "swiped".
+    // That first value is only put straight, never acted on (it would delete the row again); later swipes act as usual.
+    var first by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(true) }
+    val tick by androidx.compose.runtime.rememberUpdatedState(onTick)
+    val delete by androidx.compose.runtime.rememberUpdatedState(onDelete)
+    // Act once the swipe has settled (not while dragging past the threshold and back).
+    androidx.compose.runtime.LaunchedEffect(state.currentValue) {
+        if (first) {
+            first = false
+            if (state.currentValue != androidx.compose.material3.SwipeToDismissBoxValue.Settled) {
+                state.snapTo(androidx.compose.material3.SwipeToDismissBoxValue.Settled)
+                return@LaunchedEffect
+            }
+        }
+        when (state.currentValue) {
+            androidx.compose.material3.SwipeToDismissBoxValue.StartToEnd -> { tick(); state.snapTo(androidx.compose.material3.SwipeToDismissBoxValue.Settled) }
+            androidx.compose.material3.SwipeToDismissBoxValue.EndToStart -> delete()
+            androidx.compose.material3.SwipeToDismissBoxValue.Settled -> Unit
+        }
+    }
+    val c = MaterialTheme.colorScheme
+    androidx.compose.material3.SwipeToDismissBox(
+        state = state,
+        enableDismissFromStartToEnd = enabled,
+        enableDismissFromEndToStart = enabled,
+        gesturesEnabled = enabled,
+        backgroundContent = {
+            val dir = state.dismissDirection
+            if (dir == androidx.compose.material3.SwipeToDismissBoxValue.Settled) return@SwipeToDismissBox
+            val right = dir == androidx.compose.material3.SwipeToDismissBoxValue.StartToEnd
+            Box(
+                Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 4.dp)
+                    .background(if (right) c.primaryContainer else c.errorContainer, MaterialTheme.shapes.medium)
+                    .padding(horizontal = 20.dp),
+                contentAlignment = if (right) Alignment.CenterStart else Alignment.CenterEnd,
+            ) {
+                androidx.compose.material3.Icon(
+                    if (right) androidx.compose.material.icons.Icons.Default.Check else androidx.compose.material.icons.Icons.Default.Delete,
+                    contentDescription = null, tint = if (right) c.onPrimaryContainer else c.onErrorContainer,
+                )
+            }
+        },
+    ) {
+        // For TalkBack, on the row it focuses (the caller puts [actions] on its clickable row).
+        content(
+            if (!enabled) Modifier else Modifier.semantics {
+                customActions = listOf(
+                    androidx.compose.ui.semantics.CustomAccessibilityAction(if (ticked) "Untick" else "Tick") { onTick(); true },
+                    androidx.compose.ui.semantics.CustomAccessibilityAction("Delete") { onDelete(); true },
+                )
+            }
+        )
+    }
 }

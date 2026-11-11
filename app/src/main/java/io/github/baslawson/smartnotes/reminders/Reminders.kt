@@ -312,7 +312,7 @@ object Notifications {
     private const val CHANNEL = "reminders"
     /** The ringing alarm's channel: silent, since AlarmService plays the alarm sound itself. */
     const val ALARM_CHANNEL = "alarm"
-    private val WHEN = DateTimeFormatter.ofPattern("EEE d MMM HH:mm")
+    private val WHEN = DateTimeFormatter.ofPattern("EEE d MMM")
 
     fun createChannels(context: Context) {
         val manager = context.getSystemService(NotificationManager::class.java)
@@ -336,7 +336,8 @@ object Notifications {
 
     fun id(kind: String, ownerId: Long, at: LocalDateTime): Int = "$kind:$ownerId:$at".hashCode()
 
-    fun whenText(at: LocalDateTime): String = WHEN.format(at)
+    /** "Fri 13 Nov 15:00" or "Fri 13 Nov 3:00 PM", as Settings → Time format says. */
+    fun whenText(at: LocalDateTime, clock: io.github.baslawson.smartnotes.TimeStyle): String = WHEN.format(at) + " " + clock.format(at.toLocalTime())
 
     fun open(context: Context, route: String, requestCode: Int, stopToken: String? = null): PendingIntent =
         PendingIntent.getActivity(
@@ -360,7 +361,7 @@ object Notifications {
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle((if (missed) "Missed: " else "") + c.title)
             .setContentText(c.text)
-            .setSubText(whenText(c.at))
+            .setSubText(whenText(c.at, io.github.baslawson.smartnotes.TimeStyle.of(context)))
             .setStyle(NotificationCompat.BigTextStyle().bigText(c.text))
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_REMINDER)

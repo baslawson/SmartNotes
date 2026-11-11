@@ -49,4 +49,25 @@ class ShoppingTest {
         assertEquals(1..4, Shopping.matchIn("İncir", "ncir"))
         assertEquals(null, Shopping.matchIn("İncir", "i̇ncir"))
     }
+
+    @Test fun sharedListsLoseTheirBullets() {
+        assertEquals(
+            listOf("milk", "2x bread", "eggs", "apples 1kg", "coffee", "tea"),
+            Shopping.sharedLines("- milk\n* 2x bread\n\n• eggs\n- [ ] apples 1kg\n1. coffee\n[x] tea\n  "),
+        )
+    }
+
+    @Test fun quantitiesStepByOne() {
+        assertEquals("3x", Shopping.step("2x", 1))
+        assertEquals("x13", Shopping.step("x12", 1))
+        assertEquals("3 packs", Shopping.step("2 packs", 1))
+        assertEquals("1.5", Shopping.step("2.5", -1))
+        assertEquals(null, Shopping.step("1.5kg", 1))
+        assertEquals(null, Shopping.step("500g", 1))
+        assertEquals(null, Shopping.step("2L", -1))
+        assertEquals("9", Shopping.step("10", -1))
+        assertEquals("", Shopping.step("1x", -1))
+        assertEquals("", Shopping.step("0.5", -1))
+        assertEquals(null, Shopping.step("", 1))
+    }
 }

@@ -32,4 +32,18 @@ class NoteGridSettingTest {
         b.import(mapOf("noteGrid" to false))
         assertFalse(b.noteGrid.value)
     }
+
+    @Test fun timeFormatIsRememberedAndGoesIntoBackups() {
+        val a = settings("t1")
+        assertEquals(TimeFormat.PHONE, a.timeFormat.value)
+        a.setTimeFormat(TimeFormat.H12)
+        assertEquals(TimeFormat.H12, settings("t1").timeFormat.value)
+        assertEquals("H12", a.export()["timeFormat"])
+        val b = settings("t2")
+        b.import(a.export())
+        assertEquals(TimeFormat.H12, b.timeFormat.value)
+        // An older backup without it leaves it as it is.
+        b.import(a.export() - "timeFormat" + ("theme" to "LIGHT"))
+        assertEquals(TimeFormat.H12, b.timeFormat.value)
+    }
 }

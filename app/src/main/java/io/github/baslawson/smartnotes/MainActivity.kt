@@ -45,6 +45,8 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.fillMaxSize
@@ -94,15 +96,75 @@ import kotlinx.coroutines.launch
  * A note this window should open: from a tapped reminder, or just made from text shared into this window. Kept per
  * window (and across turning the phone), so with two SmartNotes windows open the right one opens it.
  */
-class PendingOpen : ViewModel() {
+class PendingOpen(app: android.app.Application, private val saved: androidx.lifecycle.SavedStateHandle) : androidx.lifecycle.AndroidViewModel(app) {
     /** A navigation route ("note/5?title=", "todo/3", "shopping?list=2"). */
     val route = MutableStateFlow<String?>(null)
     /** On a plain start: the screens to reopen where the app was last (see AppState). Used once. */
     var restore: List<String>? = null
+
+    /**
+     * Text shared in, waiting for "Save as a note, a task or shopping". Kept in a private file named in the saved state
+     * (the text can be too big for the saved state itself), so the choice is still there if Android stops the app
+     * while it waits. One file per window; it goes once the text is saved or cancelled, or (on the next share) once its
+     * window has gone.
+     */
+    val share = MutableStateFlow(saved.get<String>(SHARE)?.let { read(it) })
+
+    /** Sets (or with null, drops) the text waiting in the window of task [task]. */
+    fun share(s: Shared?, task: Int = 0) {
+        share.value = s
+        saved.get<String>(SHARE)?.let { file(it).delete() }
+        saved[SHARE] = s?.let { write(it, task) }
+    }
+
+    private val dir get() = java.io.File(getApplication<android.app.Application>().filesDir, "pending-shares")
+    private fun file(name: String) = java.io.File(dir, name)
+
+    private fun read(name: String): Shared? = runCatching {
+        val j = org.json.JSONObject(file(name).readText())
+        Shared(j.getString("subject"), j.getString("text"), j.getString("from"))
+    }.onFailure { AppLog.w("Share", "Couldn't get back a pending share: $it") }.getOrNull()
+
+    private fun write(s: Shared, task: Int): String? = runCatching {
+        dir.mkdirs()
+        sweep(task)
+        // Named after its window's task, so one left behind (its window gone from Recents) can be told apart.
+        val name = "$task-" + java.util.UUID.randomUUID() + ".json"
+        file(name).writeText(org.json.JSONObject().put("subject", s.subject).put("text", s.text).put("from", s.from).toString())
+        name
+    }.onFailure { AppLog.w("Share", "Couldn't keep a pending share: $it") }.getOrNull()
+
+    /**
+     * Removes text left waiting by windows that are gone (closed or removed from Recents while the app wasn't running);
+     * a window still in Recents keeps its text, however old. A share can open SmartNotes inside the sending app's task,
+     * which isn't listed among SmartNotes' own tasks: a day's grace keeps such a waiting text from going too.
+     */
+    private fun sweep(current: Int) {
+        val app = getApplication<android.app.Application>()
+        val tasks = app.getSystemService(android.app.ActivityManager::class.java)?.appTasks ?: return
+        val live = tasks.mapNotNull { runCatching { taskId(it.taskInfo) }.getOrNull() }.toSet() + current
+        val dayAgo = System.currentTimeMillis() - 24L * 3600 * 1000
+        dir.listFiles()?.filter { it.name.substringBefore('-').toIntOrNull() !in live && it.lastModified() < dayAgo }?.forEach { it.delete() }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun taskId(info: android.app.ActivityManager.RecentTaskInfo): Int =
+        if (android.os.Build.VERSION.SDK_INT >= 29) info.taskId else info.persistentId
+
+    private companion object { const val SHARE = "share" }
 }
 
+/** Text shared in from another app: its [subject] (may be empty), [text] and the app it came [from]. */
+data class Shared(val subject: String, val text: String, val from: String)
+
 class MainActivity : ComponentActivity() {
-    private val pending: PendingOpen by viewModels()
+    // Made without the starting intent's extras: by default they go into its saved state, and a shared text can be too
+    // big for that (its file name is kept there instead).
+    private val pending: PendingOpen by viewModels(extrasProducer = {
+        androidx.lifecycle.viewmodel.MutableCreationExtras(defaultViewModelCreationExtras).apply {
+            set(androidx.lifecycle.DEFAULT_ARGS_KEY, Bundle())
+        }
+    })
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -126,6 +188,8 @@ class MainActivity : ComponentActivity() {
                 }
                 AskForNotifications()
                 UpdateDialog()
+                val shared by pending.share.collectAsStateWithLifecycle()
+                shared?.let { s -> ShareChooser(s, onPick = { kind -> pending.share(null); saveShare(s, kind) }) { pending.share(null) } }
                 val nav = rememberNavController()
                 // Navigates only while visible; a note made while the window is hidden opens when it comes back.
                 LaunchedEffect(Unit) {
@@ -185,10 +249,7 @@ class MainActivity : ComponentActivity() {
         intent.getStringExtra(EXTRA_ROUTE)?.let { pending.route.value = it }
     }
 
-    /**
-     * Text or a link shared from another app becomes a new note straight away (so it's kept even if the editor is left
-     * at once), then opens. The shared subject, when there is one, is the title.
-     */
+    /** Text or a link shared from another app: a small dialog asks whether it becomes a note, a task or shopping. */
     private fun receiveShare(intent: Intent) {
         val text = intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString().orEmpty().replace("\r\n", "\n").trim()
         val subject = intent.getStringExtra(Intent.EXTRA_SUBJECT).orEmpty().trim()
@@ -197,14 +258,44 @@ class MainActivity : ComponentActivity() {
             android.widget.Toast.makeText(this, "Only text and links can be shared into SmartNotes", android.widget.Toast.LENGTH_LONG).show()
             return
         }
+        pending.share(Shared(subject, text, referrer?.host ?: "unknown app"), taskId)
+    }
+
+    /**
+     * Saves shared text as chosen, then opens it. A note: the subject is its title. A task: the subject (or the first
+     * line) is its title, the rest its details (all of the text when the first line is too long for a title); shared
+     * text gets no reminder from its words. Shopping: each line of the text (the subject if there's no text) an item on
+     * today's list.
+     */
+    private fun saveShare(s: Shared, kind: ShareKind) {
         val app = application as SmartNotesApp
-        val from = referrer?.host ?: "unknown app"
         val target = pending.route
         // In the app's scope, so turning the phone or switching theme right now can't cancel the save.
         app.appScope.launch {
-            val note = app.notes.saveFinal(0, subject.take(200), text)
-            AppLog.i("Share", "Made note ${note?.id} from shared text (${text.length} characters, from $from)")
-            note?.let { target.value = noteRoute(it.id) }
+            when (kind) {
+                ShareKind.NOTE -> {
+                    val note = app.notes.saveFinal(0, s.subject.take(200), s.text)
+                    AppLog.i("Share", "Made note ${note?.id} from shared text (${s.text.length} characters, from ${s.from})")
+                    note?.let { target.value = noteRoute(it.id) }
+                }
+                ShareKind.TASK -> {
+                    val lines = s.text.trim().lines()
+                    val line = lines.first().trim()
+                    val title = s.subject.ifEmpty { line }.take(200)
+                    // With no subject, the first line is the title; one too long to fit keeps its whole text in the details.
+                    val details = (if (s.subject.isEmpty() && line.length <= 200) lines.drop(1).joinToString("\n") else s.text).trim()
+                    val id = app.todos.add(title, details = details)
+                    AppLog.i("Share", "Made task $id from shared text (from ${s.from})")
+                    target.value = "todo/$id"
+                }
+                ShareKind.SHOPPING -> {
+                    val today = java.time.LocalDate.now()
+                    val lines = io.github.baslawson.smartnotes.parse.Shopping.sharedLines(s.text.ifBlank { s.subject })
+                    lines.forEach { app.shopping.addOn(today, it) }
+                    AppLog.i("Share", "Added ${lines.size} shopping items from shared text (from ${s.from})")
+                    target.value = "shopping?list=${app.shopping.listForDate(today)}"
+                }
+            }
         }
     }
 
@@ -365,13 +456,55 @@ private fun SmartNotesTheme(settings: AppSettings, content: @Composable (dark: B
     val colors = smartColors(dark, Accent.BRAND)
     val density = LocalDensity.current
     val dateStyle by settings.dateStyle.collectAsStateWithLifecycle()
+    val timeFormat by settings.timeFormat.collectAsStateWithLifecycle()
+    val context = androidx.compose.ui.platform.LocalContext.current
     MaterialTheme(colorScheme = colors, typography = SmartTypography, shapes = SmartShapes) {
         CompositionLocalProvider(
             LocalDark provides dark,
             LocalDensity provides Density(density.density, density.fontScale * scale),
             io.github.baslawson.smartnotes.ui.LocalDateStyle provides dateStyle,
+            io.github.baslawson.smartnotes.ui.LocalTimeStyle provides timeFormat.style(context),
         ) {
             content(dark)
         }
     }
+}
+
+enum class ShareKind { NOTE, TASK, SHOPPING }
+
+/** "Save shared text as": a note, a task or shopping (today), with a peek at the text. Cancel keeps nothing. */
+@Composable
+private fun ShareChooser(s: Shared, onPick: (ShareKind) -> Unit, onCancel: () -> Unit) {
+    val items = remember(s) { io.github.baslawson.smartnotes.parse.Shopping.sharedLines(s.text.ifBlank { s.subject }).size }
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onCancel,
+        // A stray tap beside it mustn't throw the shared text away: Cancel or Back does.
+        properties = androidx.compose.ui.window.DialogProperties(dismissOnClickOutside = false),
+        title = { androidx.compose.material3.Text("Save shared text as") },
+        text = {
+            androidx.compose.foundation.layout.Column {
+                androidx.compose.material3.Text(
+                    listOf(s.subject, s.text).filter { it.isNotEmpty() }.joinToString("\n"), maxLines = 3,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    style = androidx.compose.material3.MaterialTheme.typography.bodyMedium,
+                    color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = 12.dp),
+                )
+                listOf(
+                    Triple(ShareKind.NOTE, androidx.compose.material.icons.Icons.AutoMirrored.Filled.List, "A note"),
+                    Triple(ShareKind.TASK, androidx.compose.material.icons.Icons.Default.CheckCircle, "A task"),
+                    Triple(ShareKind.SHOPPING, androidx.compose.material.icons.Icons.Default.ShoppingCart, if (items == 1) "Shopping for today" else "Shopping for today ($items items)"),
+                ).forEach { (kind, icon, label) ->
+                    androidx.compose.material3.ListItem(
+                        headlineContent = { androidx.compose.material3.Text(label) },
+                        leadingContent = { androidx.compose.material3.Icon(icon, contentDescription = null) },
+                        colors = androidx.compose.material3.ListItemDefaults.colors(containerColor = Color.Transparent),
+                        modifier = Modifier.clip(androidx.compose.material3.MaterialTheme.shapes.medium).clickable { onPick(kind) },
+                    )
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = { androidx.compose.material3.TextButton(onClick = onCancel) { androidx.compose.material3.Text("Cancel") } },
+    )
 }

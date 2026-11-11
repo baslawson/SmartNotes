@@ -7,4 +7,5 @@
     <exclude domain="sharedpref" path="lists.xml" />
     <exclude domain="sharedpref" path="backup.xml" />
     <exclude domain="file" path="backups/" />
+    <exclude domain="file" path="pending-shares/" />
 </full-backup-content>

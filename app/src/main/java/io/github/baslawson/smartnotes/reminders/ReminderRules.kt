@@ -50,10 +50,14 @@ enum class Repeat(val label: String) {
 
 /** Snooze choices, as Planner's. */
 enum class SnoozeChoice(private val text: String) {
-    TEN_MINUTES("10 minutes"), ONE_HOUR("1 hour"), TOMORROW("Tomorrow at 9 am");
+    TEN_MINUTES("10 minutes"), ONE_HOUR("1 hour"), TOMORROW("Tomorrow");
 
-    /** Before 4 am "tomorrow" is the coming morning, and is said so. */
-    fun label(now: LocalDateTime): String = if (this == TOMORROW && now.hour < EARLY_MORNING_HOUR) "This morning at 9 am" else text
+    /** Before 4 am "tomorrow" is the coming morning, and is said so; 9:00 as Settings → Time format writes it. */
+    fun label(now: LocalDateTime, clock: io.github.baslawson.smartnotes.TimeStyle = io.github.baslawson.smartnotes.TimeStyle(false)): String {
+        if (this != TOMORROW) return text
+        val nine = clock.format(java.time.LocalTime.of(9, 0))
+        return if (now.hour < EARLY_MORNING_HOUR) "This morning at $nine" else "Tomorrow at $nine"
+    }
 
     fun until(now: LocalDateTime): LocalDateTime = when (this) {
         TEN_MINUTES -> now.plusMinutes(10)

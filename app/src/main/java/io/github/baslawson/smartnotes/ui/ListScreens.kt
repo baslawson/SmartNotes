@@ -146,6 +146,7 @@ import io.github.baslawson.smartnotes.parse.PastItem
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
+import androidx.compose.material3.InputChip
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.widthIn
@@ -161,6 +162,8 @@ import java.time.ZoneOffset
 
 /** Settings → Date format, provided around the whole app. */
 val LocalDateStyle = staticCompositionLocalOf { DateStyle.DEFAULT }
+/** 12- or 24-hour, from Settings → Time format: every time shown or picked. */
+val LocalTimeStyle = staticCompositionLocalOf { io.github.baslawson.smartnotes.TimeStyle(true) }
 
 private fun parseDate(s: String?): LocalDate? = s?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
 private fun parseTime(s: String?): LocalTime? = s?.let { runCatching { LocalTime.parse(it) }.getOrNull() }
@@ -198,7 +201,7 @@ fun DatePickDialog(initial: LocalDate?, onPick: (LocalDate) -> Unit, onDismiss: 
 @Composable
 fun TimePickDialog(initial: LocalTime?, onPick: (LocalTime) -> Unit, onDismiss: () -> Unit) {
     val start = initial ?: LocalTime.of(9, 0)
-    val state = rememberTimePickerState(start.hour, start.minute, is24Hour = true)
+    val state = rememberTimePickerState(start.hour, start.minute, is24Hour = LocalTimeStyle.current.h24)
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Time") },
@@ -343,11 +346,11 @@ fun TasksScreen(vm: TodoViewModel, onOpen: (Long) -> Unit, onBack: () -> Unit, b
         }
         Column(Modifier.padding(padding).fillMaxSize()) {
             TextField(
-                value = vm.input, onValueChange = { vm.input = it },
+                value = vm.input, onValueChange = vm::type,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
                 shape = PillShape, colors = pillColors(),
                 leadingIcon = { Icon(Icons.Default.Add, contentDescription = null) },
-                placeholder = { Text("Add a task") }, singleLine = true,
+                placeholder = { Text("Add a task, e.g. Call Sam tomorrow 3pm") }, singleLine = true,
                 keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Done),
                 keyboardActions = KeyboardActions(onDone = { vm.add() }),
                 // On the right: add what is typed, and search all tasks (for what is typed, if anything).
@@ -358,6 +361,17 @@ fun TasksScreen(vm: TodoViewModel, onOpen: (Long) -> Unit, onBack: () -> Unit, b
                     }
                 },
             )
+            // A date and time typed at the end become the task's reminder; ✕ keeps them as words in the title.
+            vm.typedDate()?.let { found ->
+                val style = LocalDateStyle.current
+                InputChip(
+                    selected = true, onClick = { vm.dateOff = true },
+                    // A moment already gone by is still saved (as typed), but won't ring: the chip says so.
+                    label = { Text("⏰ ${style.dayLabel(found.date)} ${LocalTimeStyle.current.format(found.time ?: java.time.LocalTime.of(9, 0))}" + if (found.passed) " · passed, won't remind" else "") },
+                    trailingIcon = { Icon(Icons.Default.Clear, contentDescription = "Keep as text", Modifier.size(18.dp)) },
+                    modifier = Modifier.padding(start = 24.dp),
+                )
+            }
             if (state.loaded && state.todos.isEmpty()) {
                 EmptyState(Icons.Default.CheckCircle, "No tasks yet", "Type one above. Tap a task to add details, a priority or a reminder.")
                 return@Column
@@ -386,11 +400,14 @@ fun TasksScreen(vm: TodoViewModel, onOpen: (Long) -> Unit, onBack: () -> Unit, b
                 }
                 items(order.ids.mapNotNull { byId[it] }, key = { "t:${it.id}" }) { t ->
                     ReorderableItem(reorder, key = "t:${t.id}", enabled = canArrange) { dragging ->
+                        // Swipe right to tick, left to delete.
+                        SwipeActions(!selection.active && !dragging, t.done, onTick = { tick(t, true) }, onDelete = { vm.delete(t.id) }) { actions ->
                         RowCard(dragging = dragging) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                TodoLine(t, onCheck = { tick(t, it) }, Modifier.weight(1f).selectable(selection, t.id) { onOpen(t.id) })
+                                TodoLine(t, onCheck = { tick(t, it) }, Modifier.weight(1f).selectable(selection, t.id) { onOpen(t.id) }.then(actions))
                                 if (canArrange) DragHandleIcon(t.title, Modifier.draggableHandle(onDragStarted = { order.start() }, onDragStopped = { order.stop()?.let(vm::arrange) }).padding(12.dp))
                             }
+                        }
                         }
                     }
                 }
@@ -401,8 +418,10 @@ fun TasksScreen(vm: TodoViewModel, onOpen: (Long) -> Unit, onBack: () -> Unit, b
                         }
                     }
                     if (showDone) items(done, key = { "t:${it.id}" }) { t ->
-                        RowCard(faded = true) {
-                            TodoLine(t, onCheck = { vm.setDone(t, it) }, Modifier.selectable(selection, t.id) { onOpen(t.id) })
+                        SwipeActions(!selection.active, t.done, onTick = { vm.setDone(t, false) }, onDelete = { vm.delete(t.id) }) { actions ->
+                            RowCard(faded = true) {
+                                TodoLine(t, onCheck = { vm.setDone(t, it) }, Modifier.selectable(selection, t.id) { onOpen(t.id) }.then(actions))
+                            }
                         }
                     }
                 }
@@ -482,7 +501,8 @@ private fun TodoLine(t: Todo, onCheck: (Boolean) -> Unit, modifier: Modifier, te
                 )
             }
             val style = LocalDateStyle.current
-            val reminder = t.reminder()?.let { at -> "⏰ ${style.dayLabel(at.toLocalDate())} ${at.toLocalTime()}" + if (Repeat.of(t.repeat) != Repeat.NONE) " ↻" else "" }
+            val clock = LocalTimeStyle.current
+            val reminder = t.reminder()?.let { at -> "⏰ ${style.dayLabel(at.toLocalDate())} ${clock.format(at.toLocalTime())}" + if (Repeat.of(t.repeat) != Repeat.NONE) " ↻" else "" }
             // Searching: the part of the details with the match (as typed); otherwise their first line.
             val about = if (terms.isNotEmpty() && Search.matches(t.details, terms).isNotEmpty()) Search.snippet(t.details, terms, 60, readable = false)
                 else t.details.lineSequence().firstOrNull { it.isNotBlank() }?.take(60)
@@ -560,7 +580,7 @@ fun TodoEditorScreen(vm: TodoEditorViewModel, setting: ReminderSound, onBack: ()
                 } else {
                     OutlinedButton(onClick = { pickDate = true }) { Text(LocalDateStyle.current.format(at.toLocalDate())) }
                     Spacer(Modifier.width(8.dp))
-                    OutlinedButton(onClick = { pickTime = true }) { Text(at.toLocalTime().toString()) }
+                    OutlinedButton(onClick = { pickTime = true }) { Text(LocalTimeStyle.current.format(at.toLocalTime())) }
                     Spacer(Modifier.weight(1f))
                     IconButton(onClick = { vm.update { it.copy(dueDate = null, dueTime = null, remind = false, repeat = Repeat.NONE.name) } }) {
                         Icon(Icons.Default.Clear, contentDescription = "Remove reminder")
@@ -780,13 +800,17 @@ fun ShoppingScreen(vm: ShoppingViewModel, setting: ReminderSound, onBack: () -> 
                 }
                 items(order.ids.mapNotNull { byId[it] }, key = { it.id }) { item ->
                     ReorderableItem(reorder, key = item.id, enabled = canArrange) { dragging ->
-                        RowCard(dragging = dragging) {
-                            ItemLine(item, selection, onCheck = { now ->
-                                // Ticking off the last thing to buy: a little party.
-                                if (now && open.size == 1) party.fire(Celebration.SHOPPING.random())
-                                vm.setChecked(item, now)
-                            }, onDelete = { vm.delete(item) }, onEdit = { renamingId = item.id }) {
-                                if (canArrange) DragHandleIcon(item.name, Modifier.draggableHandle(onDragStarted = { order.start() }, onDragStopped = { order.stop()?.let(vm::arrangeItems) }).padding(12.dp))
+                        val check: (Boolean) -> Unit = { now ->
+                            // Ticking off the last thing to buy: a little party.
+                            if (now && open.size == 1) party.fire(Celebration.SHOPPING.random())
+                            vm.setChecked(item, now)
+                        }
+                        // Swipe right to tick, left to remove.
+                        SwipeActions(!selection.active && !dragging, item.checked, onTick = { check(true) }, onDelete = { vm.delete(item) }) { actions ->
+                            RowCard(dragging = dragging) {
+                                ItemLine(item, selection, onCheck = check, onDelete = { vm.delete(item) }, onEdit = { renamingId = item.id }, onStep = { vm.step(item, it) }, actions = actions) {
+                                    if (canArrange) DragHandleIcon(item.name, Modifier.draggableHandle(onDragStarted = { order.start() }, onDragStopped = { order.stop()?.let(vm::arrangeItems) }).padding(12.dp))
+                                }
                             }
                         }
                     }
@@ -799,8 +823,10 @@ fun ShoppingScreen(vm: ShoppingViewModel, setting: ReminderSound, onBack: () -> 
                         }
                     }
                     items(anytimeOpen, key = { "a:${it.id}" }) { item ->
-                        RowCard(faded = true) {
-                            ItemLine(item, selection, onCheck = { vm.setChecked(item, it) }, onDelete = { vm.delete(item) }, onEdit = { renamingId = item.id })
+                        SwipeActions(!selection.active, item.checked, onTick = { vm.setChecked(item, true) }, onDelete = { vm.delete(item) }) { actions ->
+                            RowCard(faded = true) {
+                                ItemLine(item, selection, onCheck = { vm.setChecked(item, it) }, onDelete = { vm.delete(item) }, onEdit = { renamingId = item.id }, onStep = { vm.step(item, it) }, actions = actions)
+                            }
                         }
                     }
                 }
@@ -812,8 +838,11 @@ fun ShoppingScreen(vm: ShoppingViewModel, setting: ReminderSound, onBack: () -> 
                         }
                     }
                     if (showTicked) items(checked, key = { it.id }) { item ->
-                        RowCard(faded = true) {
-                            ItemLine(item, selection, onCheck = { vm.setChecked(item, it) }, onDelete = { vm.delete(item) }, onEdit = { renamingId = item.id })
+                        // Ticked already: swiping right unticks it.
+                        SwipeActions(!selection.active, item.checked, onTick = { vm.setChecked(item, false) }, onDelete = { vm.delete(item) }) { actions ->
+                            RowCard(faded = true) {
+                                ItemLine(item, selection, onCheck = { vm.setChecked(item, it) }, onDelete = { vm.delete(item) }, onEdit = { renamingId = item.id }, onStep = { vm.step(item, it) }, actions = actions)
+                            }
                         }
                     }
                 }
@@ -1172,12 +1201,13 @@ private fun DayCell(
 @Composable
 private fun DayHeader(day: LocalDate?, today: LocalDate, list: ShoppingList?, done: Int, total: Int) {
     val style = LocalDateStyle.current
+    val clock = LocalTimeStyle.current
     Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 12.dp, top = 2.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(day?.let { dayName(it, today) } ?: "Anytime", style = MaterialTheme.typography.titleLarge)
             val sub = if (day == null) "Buy whenever: shown on today's list too" else buildString {
                 append(style.format(day, today))
-                parseTime(list?.remindAt)?.let { append(" · ⏰ ").append(it) }
+                parseTime(list?.remindAt)?.let { append(" · ⏰ ").append(clock.format(it)) }
             }
             Text(sub, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
@@ -1259,7 +1289,7 @@ private fun ShoppingListDialog(
                 if (date != null) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("Reminder", Modifier.weight(1f))
-                        OutlinedButton(onClick = { pickTime = true }) { Text(parseTime(time)?.toString() ?: "Add") }
+                        OutlinedButton(onClick = { pickTime = true }) { Text(parseTime(time)?.let { LocalTimeStyle.current.format(it) } ?: "Add") }
                         if (time != null) IconButton(onClick = { time = null }) { Icon(Icons.Default.Clear, contentDescription = "No reminder") }
                     }
                     if (time != null) {
@@ -1302,9 +1332,15 @@ private fun ItemLine(
     onCheck: (Boolean) -> Unit,
     onDelete: () -> Unit,
     onEdit: () -> Unit,
+    onStep: (Int) -> Unit = {},
+    actions: Modifier = Modifier,
     handle: @Composable () -> Unit = {},
 ) {
-    Row(Modifier.fillMaxWidth().selectable(selection, item.id, onEdit), verticalAlignment = Alignment.CenterVertically) {
+    // Tap the quantity for – / + (they go again after a few seconds untouched).
+    var stepping by remember(item.id) { mutableStateOf(false) }
+    LaunchedEffect(stepping, item.quantity) { if (stepping) { kotlinx.coroutines.delay(4_000); stepping = false } }
+    val canStep = !selection.active && Shopping.step(item.quantity, 1) != null
+    Row(Modifier.fillMaxWidth().selectable(selection, item.id, onEdit).then(actions), verticalAlignment = Alignment.CenterVertically) {
         FunCheckbox(checked = item.checked, onCheckedChange = onCheck)
         Text(
             item.name,
@@ -1312,8 +1348,20 @@ private fun ItemLine(
             textDecoration = if (item.checked) TextDecoration.LineThrough else null,
             color = if (item.checked) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
         )
+        if (stepping && canStep) {
+            IconButton(onClick = { onStep(-1) }, Modifier.semantics { contentDescription = "One less ${item.name}" }) {
+                Text("−", style = MaterialTheme.typography.titleLarge)
+            }
+        }
         if (item.quantity.isNotEmpty()) {
-            Text(item.quantity, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+            Text(
+                item.quantity, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary,
+                modifier = if (canStep) Modifier.clip(PillShape).clickable(onClickLabel = "Change the quantity") { stepping = !stepping }
+                    .padding(horizontal = 8.dp, vertical = 12.dp) else Modifier,
+            )
+        }
+        if (stepping && canStep) {
+            IconButton(onClick = { onStep(1) }) { Icon(Icons.Default.Add, contentDescription = "One more ${item.name}") }
         }
         if (!selection.active) IconButton(onClick = onDelete) { Icon(Icons.Default.Clear, contentDescription = "Remove ${item.name}") }
         handle()

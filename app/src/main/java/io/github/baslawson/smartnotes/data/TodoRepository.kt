@@ -28,11 +28,17 @@ class TodoRepository(private val dao: TodoDao, private val alarms: AlarmSchedule
     /** The task, unless it is gone or in the recycle bin (an old notification then opens nothing). */
     suspend fun get(id: Long): Todo? = dao.get(id)?.takeIf { it.deletedAt == null }
 
-    suspend fun add(title: String): Long = lock.withLock {
+    /** A new task; with [dueDate] (and [dueTime], else 9:00) it reminds then, as set in the editor. */
+    suspend fun add(title: String, dueDate: java.time.LocalDate? = null, dueTime: java.time.LocalTime? = null, details: String = ""): Long = lock.withLock {
         val now = clock.millis()
         // New tasks go on top of "My order".
-        val id = dao.insert(Todo(title = title.trim(), createdAt = now, updatedAt = now, position = dao.minPosition() - 1))
-        AppLog.i("Todo", "Added task $id \"${title.trim()}\"")
+        val todo = Todo(
+            title = title.trim(), details = details, createdAt = now, updatedAt = now, position = dao.minPosition() - 1,
+            dueDate = dueDate?.toString(), dueTime = dueTime?.toString(), remind = dueDate != null,
+        )
+        val id = dao.insert(todo)
+        if (dueDate != null) syncAlarm(todo.copy(id = id))
+        AppLog.i("Todo", "Added task $id \"${title.trim()}\"" + (dueDate?.let { " for $it ${dueTime ?: ""}" } ?: ""))
         id
     }
 

@@ -124,6 +124,10 @@ class ScreenshotTest {
         compose.onNodeWithContentDescription("Search tasks").performClick()
         compose.onNode(hasSetTextAction()).performTextInput("the")
         shot("light-8-task-search", "Water the plants")
+        // A date typed at the end: the chip shows the reminder it will set.
+        compose.onNodeWithContentDescription("Close search").performClick()
+        compose.onNode(hasSetTextAction()).performTextInput("Call Sam tomorrow 3pm")
+        shot("light-9-task-date", "⏰ Tomorrow")
     }
 
     @Test fun dark() {

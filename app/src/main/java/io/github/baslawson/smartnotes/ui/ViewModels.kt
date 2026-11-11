@@ -32,6 +32,9 @@ import io.github.baslawson.smartnotes.parse.NoteParser
 import io.github.baslawson.smartnotes.parse.PastItem
 import io.github.baslawson.smartnotes.parse.Related
 import io.github.baslawson.smartnotes.parse.Search
+import io.github.baslawson.smartnotes.parse.TaskDates
+import io.github.baslawson.smartnotes.data.Week
+import java.time.LocalDateTime
 import io.github.baslawson.smartnotes.parse.Shopping
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -462,6 +465,19 @@ class TodoViewModel(
     }
 
     var input by mutableStateOf("")
+        private set
+
+    /** ✕ on the reminder chip: the date words stay in the title (until the box is emptied). */
+    var dateOff by mutableStateOf(false)
+
+    fun type(text: String) {
+        input = text
+        if (text.isBlank()) dateOff = false
+    }
+
+    /** The reminder at the end of what is typed ("… tomorrow 3pm"), unless turned off with ✕. */
+    fun typedDate(now: LocalDateTime = LocalDateTime.now()): TaskDates.Found? =
+        if (dateOff) null else TaskDates.find(input, now, Week.firstDay())
 
     val state: StateFlow<TodoState> = repo.observeAll().map { TodoState(it, loaded = true) }
         .stateIn(viewModelScope, SHARING, TodoState())
@@ -469,11 +485,17 @@ class TodoViewModel(
     fun add() {
         val title = input.trim()
         if (title.isEmpty()) return
-        input = ""
-        appScope.launch { repo.add(title) }
+        val found = typedDate()
+        type("")
+        appScope.launch {
+            if (found != null) repo.add(found.title, found.date, found.time) else repo.add(title)
+        }
     }
 
     fun setDone(todo: Todo, done: Boolean) = appScope.launch { repo.setDone(todo.id, done) }
+
+    /** One task to the recycle bin (swiped away), with Undo for a moment. */
+    fun delete(id: Long) = appScope.launch { bin.trash(BinKind.TASK, listOf(id)) }
 
     /** The search box's text; null while search is closed. */
     val searchQuery = MutableStateFlow<String?>(null)
@@ -793,6 +815,9 @@ class ShoppingViewModel(
     fun rename(item: ShoppingItem, text: String) = appScope.launch {
         if (!repo.rename(item, text)) withContext(Dispatchers.Main) { nameTaken = true }
     }
+
+    /** – / + on an item's quantity: one less or more ("2x" → "3x"); below 1 the quantity goes. */
+    fun step(item: ShoppingItem, delta: Int) = appScope.launch { repo.step(item.id, delta) }
 
     /** A rename refused because the list already has an item with that name (added meanwhile, say). */
     var nameTaken by mutableStateOf(false)

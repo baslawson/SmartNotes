@@ -57,6 +57,37 @@ enum class DateStyle(private val pattern: String) {
     }
 }
 
+/** Settings → Time format: 12- or 24-hour clock, or as the phone is set (Android's "Use 24-hour format"). */
+enum class TimeFormat(val label: String) {
+    PHONE("Phone's setting"), H12("12-hour"), H24("24-hour");
+
+    /** The clock to use: the phone's own, with PHONE (24-hour when there is no [context] to ask). */
+    fun style(context: android.content.Context?): TimeStyle = TimeStyle(
+        when (this) {
+            H12 -> false
+            H24 -> true
+            PHONE -> context?.let { android.text.format.DateFormat.is24HourFormat(it) } ?: true
+        }
+    )
+
+    companion object {
+        val DEFAULT = PHONE
+        fun of(name: String?): TimeFormat = entries.firstOrNull { it.name == name } ?: DEFAULT
+    }
+}
+
+/** How times are written and picked: "15:30" ([h24]) or "3:30 PM". */
+data class TimeStyle(val h24: Boolean) {
+    fun format(time: java.time.LocalTime, locale: Locale = Locale.getDefault()): String =
+        DateTimeFormatter.ofPattern(if (h24) "HH:mm" else "h:mm a", locale).format(time)
+
+    companion object {
+        /** The app's setting, outside the screens (notifications, the snooze dialog). */
+        fun of(context: android.content.Context): TimeStyle =
+            (context.applicationContext as? SmartNotesApp)?.settings?.timeFormat?.value?.style(context) ?: TimeStyle(true)
+    }
+}
+
 /** Settings → Appearance: the theme and the text size, kept on the phone. */
 class AppSettings(private val prefs: SharedPreferences) {
     private val _theme = MutableStateFlow(
@@ -90,6 +121,15 @@ class AppSettings(private val prefs: SharedPreferences) {
         prefs.edit().putString(KEY_DATE, style.name).apply()
         _dateStyle.value = style
         AppLog.i("Settings", "Date format ${style.name}")
+    }
+
+    private val _timeFormat = MutableStateFlow(TimeFormat.of(prefs.getString(KEY_TIME, null)))
+    val timeFormat: StateFlow<TimeFormat> = _timeFormat.asStateFlow()
+
+    fun setTimeFormat(format: TimeFormat) {
+        prefs.edit().putString(KEY_TIME, format.name).apply()
+        _timeFormat.value = format
+        AppLog.i("Settings", "Time format ${format.name}")
     }
 
     // ---------- The sort buttons (and which sections have been put in "My order" before) ----------
@@ -155,7 +195,7 @@ class AppSettings(private val prefs: SharedPreferences) {
     /** The settings a backup carries (see data/Backup.kt). */
     fun export(): Map<String, Any> = mapOf(
         "theme" to theme.value.name, "textScale" to textScale.value.toDouble(), "reminderSound" to reminderSound.value.name,
-        "dateStyle" to dateStyle.value.name, "keepFor" to keepFor.value.name,
+        "dateStyle" to dateStyle.value.name, "timeFormat" to timeFormat.value.name, "keepFor" to keepFor.value.name,
         "noteSort" to noteSort.value.name, "taskSort" to taskSort.value.name, "itemSort" to itemSort.value.name,
         "listSort" to listSort.value.name,
         "showDoneTasks" to showDoneTasks.value, "showTickedItems" to showTickedItems.value, "noteGrid" to noteGrid.value,
@@ -168,6 +208,7 @@ class AppSettings(private val prefs: SharedPreferences) {
         (values["textScale"] as? Number)?.let { setTextScale(it.toFloat()) }
         (values["reminderSound"] as? String)?.let { name -> ReminderSound.entries.firstOrNull { it.name == name } }?.let(::setReminderSound)
         (values["dateStyle"] as? String)?.let { name -> DateStyle.entries.firstOrNull { it.name == name } }?.let(::setDateStyle)
+        (values["timeFormat"] as? String)?.let { name -> TimeFormat.entries.firstOrNull { it.name == name } }?.let(::setTimeFormat)
         (values["keepFor"] as? String)?.let { name -> KeepFor.entries.firstOrNull { it.name == name } }?.let(::setKeepFor)
         (values["noteSort"] as? String)?.let { name -> NoteSort.entries.firstOrNull { it.name == name } }?.let(::setNoteSort)
         (values["taskSort"] as? String)?.let { name -> TaskSort.entries.firstOrNull { it.name == name } }?.let(::setTaskSort)
@@ -188,6 +229,7 @@ class AppSettings(private val prefs: SharedPreferences) {
         private const val KEY_TEXT_SCALE = "text_scale"
         private const val KEY_SOUND = "reminder_sound"
         private const val KEY_DATE = "date_style"
+        private const val KEY_TIME = "time_format"
         private const val KEY_KEEP = "bin_keep"
         private const val KEY_NOTE_SORT = "sort_notes"
         private const val KEY_TASK_SORT = "sort_tasks"
