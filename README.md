@@ -29,21 +29,29 @@ Feb 28 → Mar 31). Ticking a repeating task moves its reminder to the next time
 
 ## Shopping
 
-Lists are dates: *+ New date* asks for a day and opens that day's list (one per day). *Anytime* is the undated list
-and can't be deleted. A dated list's ✎ changes its date or sets a reminder on that day (with its sound), or deletes it.
-Dates show as Today / Tomorrow or in Settings → Date format; the top bar shows the open list's day and full
-date. Type `2x milk`, `milk 2L` or `eggs x12`: the quantity shows apart from the name. Tap an item's name to rename it or change its quantity (suggestions follow the new name); a name already on that list isn't taken twice. Past items pop up under the
-box while typing, the typed letters in bold (tap one to add it, ✕ forgets it), and an item already on the list isn't added twice. The reminder lists what is still to buy.
-Shopping opens on the list you looked at last; the first time, or if that list is gone, on today's (made if needed).
-The chips run Anytime, Today, Tomorrow (those three always first, in that order), then the days to come, and the
-row scrolls to the list shown. Lists whose day has gone
-are under the *Past (n)* chip: it lists them newest first with what each still has to buy, and a tap opens one (its
-chip shows while it is open). The 🔍 at the right of the add box searches (for what is typed, if anything) the items of every list in use, past ones too (not the
-recycle bin); results are grouped by list, ticked ones marked, and a tap opens that list. What a past list still has to buy carries over to today's list (made if needed) when Shopping is opened, at
-midnight while it is open, and just before today's list reminds you; an item today's list already has isn't added
-twice. A past list with nothing left to buy (empty or all ticked) goes to the recycle bin by itself when Shopping is
-opened; one with things still to buy stays, and so does the list on screen. A list made for a
-past day afterwards, or brought back from the bin, is kept.
+Shopping is planned by day. At the top is the **week strip**: the *Anytime* tile (things to buy whenever, with how
+many are still to buy), then the days of the week (starting on the phone's first day of the week). Today is ringed, the
+day shown is filled, and a dot marks each day with something still to buy. Swipe the strip, or ‹ ›, for other weeks;
+*Today* comes back. Tap any day to see its list: there is no step to make one, a day gets its list with its first item
+(until then it says *Nothing planned yet*). On today, Anytime's items show below today's, under *Also on Anytime*, to
+tick off in the shop too. ✎ sets the day's reminder (with its sound), moves its list to another day (one list per
+day), or deletes it. Anytime can't be deleted.
+
+Type `2x milk`, `milk 2L` or `eggs x12`: the quantity shows apart from the name. Tap an item to rename it or change its
+quantity (suggestions follow the new name); a name already on that list isn't taken twice. Past items pop up under the
+box while typing, the typed letters in bold (tap one to add it, ✕ forgets it), and an item already on the list isn't
+added twice. The reminder lists what is still to buy. **Long-press items** to select them (tap more to add), then
+**Move to…** (Anytime, Today, Tomorrow, a day in the strip or another date) or remove them; both offer *Undo*. An item
+the other day already has isn't added twice: it takes the moved quantity (unless only it had one) and is still to buy
+if either was.
+
+Shopping opens on the day you looked at last (today if that day has gone by). The 🔍 at the right of the add box
+searches (for what is typed, if anything) the items of every list in use, past ones too (not the recycle bin); results
+are grouped by day, ticked ones marked, and a tap opens that day. What a past day still has to buy carries over to
+today's list (made if needed) when Shopping is opened, at midnight while it is open, and just before today's list
+reminds you; an item today's list already has isn't added twice. A past list with nothing left to buy (empty or all
+ticked) goes to the recycle bin by itself when Shopping is opened; one with things still to buy stays, and so does the
+day on screen. A list made for a past day afterwards, or brought back from the bin, is kept.
 
 ## Look and feel
 
@@ -69,15 +77,14 @@ The sort button (three lines) on Notes, Tasks and Shopping picks the order, reme
 | Notes | Last edited, Created, Title A–Z, My order | pinned notes stay on top |
 | Tasks | Priority, Due date (a date without a time counts as 9:00), Newest, A–Z, My order | done tasks stay below |
 | Shopping items | Added, A–Z, My order | ticked items stay below |
-| Shopping lists | By date, My order | Anytime, Today and Tomorrow always first; past lists are under *Past*, newest first |
 
 Each row has a handle (≡): drag it to move the row (pinned notes among the pinned). Dropping it makes the order you
 see, with that move, *My order*, and the sort switches to it. Choosing My order from the menu the first time starts
-from the order then on screen. New notes and tasks go on top, new items and lists at the end. Notes can't be dragged
-while searching or filtering by a tag, and done tasks and ticked items stay below. Lists are arranged in Shopping →
-sort → *Arrange lists…* (dragging a chip itself would clash with scrolling the row and long-press selecting).
+from the order then on screen. New notes and tasks go on top, new items at the end. Notes can't be dragged
+while searching or filtering by a tag, and done tasks and ticked items stay below. Shopping days are always in date
+order (the week strip).
 
-Ticking is only on the box itself: a tap on a shopping item's name, or a note's checklist line, does nothing.
+Ticking is only on the box itself: a tap on a shopping item renames it, and a tap on a note's checklist line does nothing.
 
 Completed rows are hidden to start with: done tasks fold into a *Done (3)* line and ticked shopping items into *In the
 basket (3)*; *Show* / *Hide* on that line (or *Show completed* in the sort menu) switches them, remembered for Tasks
@@ -85,13 +92,13 @@ and for Shopping. *Clear done* and *Clear ticked* work either way.
 
 ## Selecting, deleting and the recycle bin
 
-Long-press a note, task or shopping list (its chip) to select it; tap more to add them; the top bar then has
-*Select all* and *Delete* (✕ or Back stops selecting). Deleting, here or from a note's or task's own screen, moves
+Long-press a note, task or shopping item to select it; tap more to add them; the top bar then has
+*Select all* and *Delete* (shopping items also *Move to…* another day; ✕ or Back stops selecting). Deleting, here or from a note's or task's own screen, moves
 things to the **recycle bin** (reminders cancelled) and shows *Undo* for a moment; ✕ on a single shopping item removes
 it at once, also with *Undo*. The bin (Notes ⋮ menu, or Settings → Recycle bin) lists deleted notes, tasks and lists
 with the days left; tap one to *Restore* or *Delete forever*, long-press to do several, or *Empty bin*. Settings →
 Recycle bin → *Keep deleted items for* 7 / 30 (default) / 90 days or Forever; older ones are erased when the app
-starts. A restored list whose day has another list by now comes back without a date.
+starts. A restored list whose day has another list by now puts its items on that list instead (not twice).
 
 ## Backup
 

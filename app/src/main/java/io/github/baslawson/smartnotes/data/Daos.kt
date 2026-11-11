@@ -208,6 +208,51 @@ interface ShoppingDao {
         return true
     }
 
+    /**
+     * Moves items [ids] to list [targetId] in one go (see [planMove]: an item the list already has isn't added twice).
+     * Returns what Undo needs, or null when the target list isn't in use (nothing moved).
+     */
+    @Transaction
+    suspend fun moveItems(ids: List<Long>, targetId: Long, now: Long): MoveUndo? {
+        if (list(targetId).let { it == null || it.deletedAt != null }) return null
+        val moving = ids.mapNotNull { item(it) }.filter { it.listId != targetId }
+        if (moving.isEmpty()) return MoveUndo(emptyList(), emptyList())
+        val target = itemsOf(targetId)
+        val plan = planMove(moving, target, targetId, maxItemPosition(targetId), now)
+        plan.move.forEach { update(it) }
+        plan.merge.forEach { update(it) }
+        plan.drop.forEach { delete(it) }
+        val changed = plan.merge.map { it.id }.toSet()
+        val after = (plan.move + plan.merge).associateBy { it.id }
+        return MoveUndo(moving, target.filter { it.id in changed }, after)
+    }
+
+    /**
+     * Undoes [moveItems]: the moved items back as they were (where their list is still in use), the merged ones too;
+     * only rows still as the move left them (a tick, rename or move since is kept). A list the move made goes again
+     * when it is left empty.
+     */
+    @Transaction
+    suspend fun undoMove(undo: MoveUndo) {
+        undo.merged.forEach { old -> if (item(old.id) == undo.after[old.id]) update(old) }
+        for (old in undo.moved) {
+            if (list(old.listId).let { it == null || it.deletedAt != null }) continue
+            val now = item(old.id)
+            if (now != null) {
+                if (now == undo.after[old.id] && findByKey(old.listId, old.key) == null) update(old)
+            } else if (old.id !in undo.after && findByKey(old.listId, old.key) == null) insert(old)
+        }
+        undo.madeList?.let { id -> if (itemCount(id) == 0 && list(id)?.remindAt == null) deleteList(id) }
+    }
+
+    /** Puts [sourceId]'s items on [targetId] (not twice), then erases [sourceId]. */
+    @Transaction
+    suspend fun mergeList(sourceId: Long, targetId: Long, now: Long) {
+        moveItems(itemsOf(sourceId).map { it.id }, targetId, now) ?: return
+        deleteItemsOf(sourceId)
+        deleteList(sourceId)
+    }
+
     @Insert
     suspend fun insert(item: ShoppingItem): Long
 

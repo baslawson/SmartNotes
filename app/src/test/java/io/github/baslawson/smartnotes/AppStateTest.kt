@@ -1,7 +1,8 @@
 package io.github.baslawson.smartnotes
 
-import io.github.baslawson.smartnotes.data.ShoppingList
-import io.github.baslawson.smartnotes.ui.listToShow
+import io.github.baslawson.smartnotes.ui.ANYTIME
+import io.github.baslawson.smartnotes.ui.dayToShow
+import java.time.LocalDate
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -35,10 +36,15 @@ class AppStateTest {
         assertEquals(0 to 0, state.scroll("notes"))
     }
 
-    @Test fun shoppingShowsTheRememberedListOnlyIfItIsStillThere() {
-        val lists = listOf(ShoppingList(1, "Shopping"), ShoppingList(4, "", date = "2026-11-11"))
-        assertEquals(4L, listToShow(4, lists))
-        assertNull(listToShow(9, lists))
-        assertNull(listToShow(0, lists))
+    @Test fun shoppingOpensOnTheRememberedDayUnlessItHasGoneBy() {
+        val today = LocalDate.of(2026, 11, 11)
+        assertEquals(LocalDate.of(2026, 11, 21), dayToShow("2026-11-21", today))
+        assertEquals(today, dayToShow("2026-11-11", today))
+        // Gone by, never saved, or unreadable: today.
+        assertEquals(today, dayToShow("2026-11-10", today))
+        assertEquals(today, dayToShow(null, today))
+        assertEquals(today, dayToShow("17", today))
+        // Anytime.
+        assertNull(dayToShow(ANYTIME, today))
     }
 }

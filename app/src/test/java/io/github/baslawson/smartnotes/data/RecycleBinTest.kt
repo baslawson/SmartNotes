@@ -26,14 +26,14 @@ class RecycleBinTest {
         assertNull(KeepFor.FOREVER.daysLeft(now, now))
     }
 
-    @Test fun aRestoredListKeepsItsDateUnlessThatDayHasAnotherList() {
+    @Test fun aRestoredListComesBackUnlessItsDayHasAnotherListThenItsItemsGoThere() {
         val list = ShoppingList(id = 4, name = "2026-11-20", date = "2026-11-20", remindAt = "09:00", deletedAt = 5)
-        assertEquals(list.copy(deletedAt = null), restoredList(list, setOf("2026-11-21")))
-        val clash = restoredList(list, setOf("2026-11-20"))
-        assertNull(clash.date)
-        assertNull(clash.remindAt)
-        assertNull(clash.deletedAt)
-        assertEquals("Restored (2026-11-20)", clash.name)
+        val other = ShoppingList(id = 7, name = "2026-11-21", date = "2026-11-21")
+        assertNull(restoreTarget(list, listOf(ShoppingList(1, "Shopping"), other)))
+        assertEquals(9L, restoreTarget(list, listOf(other, ShoppingList(id = 9, name = "x", date = "2026-11-20"))))
+        // Without a date (an older version's "Restored (…)"): onto Anytime. Anytime itself just comes back.
+        assertEquals(1L, restoreTarget(list.copy(date = null), listOf(other)))
+        assertNull(restoreTarget(ShoppingList(1, "Shopping", deletedAt = 5), listOf(other)))
     }
 
     @Test fun binnedThingsHaveNoReminder() {

@@ -2,6 +2,7 @@ package io.github.baslawson.smartnotes.ui
 
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -10,9 +11,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.baslawson.smartnotes.AppLog
-import io.github.baslawson.smartnotes.data.orderLists
 import io.github.baslawson.smartnotes.data.Sorting
-import io.github.baslawson.smartnotes.data.ListSort
 import io.github.baslawson.smartnotes.data.ItemSort
 import io.github.baslawson.smartnotes.data.TaskSort
 import io.github.baslawson.smartnotes.data.NoteSort
@@ -58,7 +57,6 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeoutOrNull
 
 private val SHARING = SharingStarted.WhileSubscribed(5_000)
 
@@ -413,9 +411,18 @@ class EditorViewModel(
 
 // ---------- To-do ----------
 
-/** Remembers which list a screen showed last (per phone), so it opens there again. */
-/** The shopping list to show: [wanted] if it is still there, else null (then today's list opens). */
-fun listToShow(wanted: Long, lists: List<ShoppingList>): Long? = wanted.takeIf { id -> lists.any { it.id == id } }
+/**
+ * The Shopping day to open on, from what was saved last time ([saved]: "anytime" or a date): Anytime (null), that day
+ * while it is today or to come, else (gone by, or nothing saved) [today].
+ */
+fun dayToShow(saved: String?, today: java.time.LocalDate): java.time.LocalDate? {
+    if (saved == ANYTIME) return null
+    val day = saved?.let { runCatching { java.time.LocalDate.parse(it) }.getOrNull() } ?: return today
+    return if (day.isBefore(today)) today else day
+}
+
+/** How the Anytime list is saved as the Shopping day. */
+const val ANYTIME = "anytime"
 
 data class TodoState(val todos: List<Todo> = emptyList(), val loaded: Boolean = false)
 
@@ -585,7 +592,10 @@ class TodoEditorViewModel(
 
 data class ShoppingState(
     val lists: List<ShoppingList> = emptyList(),
+    /** The items of the day shown (none when that day has no list yet). */
     val items: List<ShoppingItem> = emptyList(),
+    /** Anytime's items (shown under today's too). */
+    val anytime: List<ShoppingItem> = emptyList(),
     val history: List<PastItem> = emptyList(),
     val loaded: Boolean = false,
 )
@@ -600,7 +610,6 @@ class ShoppingViewModel(
     private val settings: AppSettings,
 ) : ViewModel() {
     val itemSort: StateFlow<ItemSort> = settings.itemSort
-    val listSort: StateFlow<ListSort> = settings.listSort
     /** Ticked items shown ("In the basket"; hidden to start with). */
     val showTicked: StateFlow<Boolean> = settings.showTickedItems
     fun toggleShowTicked() = settings.setShowTickedItems(!showTicked.value)
@@ -650,50 +659,53 @@ class ShoppingViewModel(
         lists.forEach { id -> repo.arrangeItemsFrom(id) { open -> Sorting.items(open, old) } }
     }
 
-    /** The lists' sort button; "My order" starts from the date order. */
-    fun setListSort(new: ListSort) {
-        if (new == ListSort.MINE && !settings.arranged("lists")) {
-            settings.setArranged("lists")
-            appScope.launch { repo.arrangeListsFrom { lists -> orderLists(lists, java.time.LocalDate.now()) } }
-        }
-        settings.setListSort(new)
-    }
-
     /** A drag ended (in any order): the open items of the list shown, in their new order, which becomes My order. */
     fun arrangeItems(ids: List<Long>) {
         // The item order is one setting for every list: the others keep the order they showed (set up once).
         val old = itemSort.value
         val list = listId.value
+        if (list <= 0) return
         orderJobs.trySend {
             if (old != ItemSort.MINE) seed(toSeed(except = list), old)
-            if (list > 0) settings.setArranged("items:$list")
+            settings.setArranged("items:$list")
             repo.arrangeItems(list, ids)
             settings.setItemSort(ItemSort.MINE)
         }
     }
 
-    /** Arrange lists: every list in its new order, which becomes My order. */
-    fun arrangeLists(ids: List<Long>) {
-        settings.setArranged("lists")
-        // Lists not in the dialog (past ones) go after, so no two lists share a place.
-        val all = ids + state.value.lists.map { it.id }.filter { it !in ids }
-        appScope.launch { repo.arrangeLists(all); settings.setListSort(ListSort.MINE) }
-    }
-
-    /** The list shown: the one asked for (a reminder), else the last one looked at; 0 = none yet (today's opens). */
-    val listId = MutableStateFlow(if (startList > 0) startList else prefs?.getLong(KEY, 0L) ?: 0L)
+    /** The day shown: a date, or null for Anytime. Opens on the day looked at last (see [dayToShow]). */
+    val day = MutableStateFlow(dayToShow(prefs?.getString(KEY_DAY, null), java.time.LocalDate.now()))
     var input by mutableStateOf("")
 
+    private val lists: StateFlow<List<ShoppingList>> = repo.observeLists().stateIn(viewModelScope, SHARING, emptyList())
+
+    /** The id of the day's list: Anytime is 1; 0 while the day has none (one is made with its first item). */
+    val listId: StateFlow<Long> = combine(day, lists) { d, all -> listIdFor(d, all) }
+        .stateIn(viewModelScope, SHARING, listIdFor(day.value, emptyList()))
+
+    private fun listIdFor(d: java.time.LocalDate?, all: List<ShoppingList>): Long =
+        if (d == null) 1L else all.firstOrNull { it.date == d.toString() }?.id ?: 0L
+
+    /** The list a reminder opened Shopping on: never tidied away while it is being opened. */
+    private val startedOn = startList
+
     init {
-        // Once per visit to Shopping: past lists with nothing left to buy go to the recycle bin (not the one shown).
-        // First what is still to buy on them moves to today's list.
+        // Opened from a list's reminder: that list's day.
+        if (startList > 0) openListId(startList)
+        // Once per visit to Shopping: what is still to buy on past lists moves to today's list, then past lists with
+        // nothing left to buy go to the recycle bin (not the one shown).
         appScope.launch { newDay() }
     }
 
     /** Past lists' unticked items carried over to today, then the emptied past lists tidied away (see init). */
     private suspend fun newDay() {
+        runCatching { repo.foldUndated() }.onFailure { AppLog.w("Shopping", "Folding undated lists failed", it) }
         runCatching { repo.carryOver() }.onFailure { AppLog.w("Shopping", "Carry-over failed", it) }
-        runCatching { repo.tidyPast(keep = listId.value) }.onFailure { AppLog.w("Shopping", "Tidy failed", it) }
+        runCatching {
+            // The day shown, read now (not from the screen's flows, which may not have started yet).
+            val shown = listIdFor(day.value, repo.observeLists().first())
+            repo.tidyPast(keep = setOf(shown, startedOn))
+        }.onFailure { AppLog.w("Shopping", "Tidy failed", it) }
     }
 
     /** The day changed while Shopping was open. */
@@ -702,12 +714,12 @@ class ShoppingViewModel(
     }
 
     val state: StateFlow<ShoppingState> = combine(
-        repo.observeLists(), listId.flatMapLatest { repo.observeItems(it) }, repo.observeHistory(),
-    ) { lists, items, history ->
-        ShoppingState(lists, items, history.map(ShoppingHistory::toPast), loaded = true)
+        repo.observeLists(), listId.flatMapLatest { repo.observeItems(it) }, repo.observeItems(1L), repo.observeHistory(),
+    ) { lists, items, anytime, history ->
+        ShoppingState(lists, items, anytime, history.map(ShoppingHistory::toPast), loaded = true)
     }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SHARING, ShoppingState())
 
-    /** List id → items still to buy (for the past lists' "2 left"). */
+    /** List id → items still to buy (the strip's dots and Anytime's count). */
     val openCounts: StateFlow<Map<Long, Int>> = repo.observeOpenCounts().stateIn(viewModelScope, SHARING, emptyMap())
 
     /** The search box's text; null while search is closed. */
@@ -720,19 +732,39 @@ class ShoppingViewModel(
         .flatMapLatest { q -> if (q.isEmpty()) flowOf(emptyList()) else repo.search(q) }
         .stateIn(viewModelScope, SHARING, emptyList())
 
-    fun select(id: Long) {
-        listId.value = id
-        prefs?.edit()?.putLong(KEY, id)?.apply()
+    /** Counts every [show], so the week strip comes back to the day shown even when it is the same day again. */
+    var shownTimes by mutableIntStateOf(0)
+        private set
+
+    /** Shows [date] (null: Anytime), remembered for next time. */
+    fun show(date: java.time.LocalDate?) {
+        if (day.value != date) selection.clear()
+        day.value = date
+        shownTimes++
+        prefs?.edit()?.putString(KEY_DAY, date?.toString() ?: ANYTIME)?.apply()
     }
 
-    fun suggestions(state: ShoppingState): List<PastItem> =
-        Shopping.suggest(input, state.history, state.items.filter { !it.checked }.map { it.key }.toSet())
+    /** Shows the day of list [id] (from its reminder), once the lists are read. */
+    fun openListId(id: Long) {
+        viewModelScope.launch { repo.observeLists().first().firstOrNull { it.id == id }?.let { openList(it) } }
+    }
 
+    /** Shows [list]'s day (a search result, a reminder). */
+    fun openList(list: ShoppingList) =
+        show(if (list.id == 1L) null else list.date?.let { runCatching { java.time.LocalDate.parse(it) }.getOrNull() })
+
+    /** Past items matching what is typed, but not what the day's list (or, on today, Anytime) still has to buy. */
+    fun suggestions(state: ShoppingState, withAnytime: Boolean): List<PastItem> {
+        val open = state.items.filter { !it.checked } + if (withAnytime) state.anytime.filter { !it.checked } else emptyList()
+        return Shopping.suggest(input, state.history, open.map { it.key }.toSet())
+    }
+
+    /** Adds what is typed to the day shown (its list made with its first item). */
     fun add(text: String = input) {
         if (text.isBlank()) return
         input = ""
-        val list = listId.value
-        appScope.launch { repo.add(list, text) }
+        val date = day.value
+        appScope.launch { repo.addOn(date, text) }
     }
 
     /** Puts the suggestion on the list, keeping a quantity already typed ("2x mi" + "milk" → 2x milk). */
@@ -755,48 +787,54 @@ class ShoppingViewModel(
         repo.delete(item.id)
         bin.itemRemoved(item)
     }
-    fun clearChecked() = listId.value.let { list -> appScope.launch { repo.clearChecked(list) } }
+    fun clearChecked() = listId.value.let { list -> if (list > 0) appScope.launch { repo.clearChecked(list) } }
     fun forget(item: PastItem) = appScope.launch { repo.forget(Shopping.key(item.name)) }
 
-    /** Saves a list's date and reminder. */
+    /** Saves a list's date and reminder (a day without a list yet gets one). */
     fun saveList(list: ShoppingList) = appScope.launch {
-        if (repo.saveList(list) == null) withContext(Dispatchers.Main) { dateTaken = true }
+        val id = repo.saveList(list)
+        withContext(Dispatchers.Main) {
+            if (id == null) dateTaken = true
+            // Moved to another day: shown there.
+            else if (list.date != null && day.value?.toString() != list.date) openList(list.copy(id = id))
+        }
     }
 
     /** A save refused because another list has that date (made meanwhile, say in another window). */
     var dateTaken by mutableStateOf(false)
 
-    /** Shows today's list (made if needed): the first time, or when the list shown has gone (deleted elsewhere). */
-    fun openToday() = openDate(java.time.LocalDate.now())
-
-    /** Shows the list for [date], making it first if needed. */
-    fun openDate(date: java.time.LocalDate) = appScope.launch {
-        val id = repo.listForDate(date)
-        // Shown once the screen's lists include it: selecting it sooner could flip back to the first list.
-        // (Not forever: the screen may be gone, or the list binned meanwhile.)
-        withTimeoutOrNull(5_000) { state.first { s -> s.lists.any { it.id == id } } } ?: return@launch
-        withContext(Dispatchers.Main) { select(id) }
-    }
-
-    /** Lists selected with a long press (Anytime can't be). */
+    /** Items selected with a long press (to move to another day, or remove). */
     val selection = Selection()
 
-    fun deleteList(id: Long) = deleteLists(listOf(id))
-
-    fun deleteSelected() {
-        val ids = selection.ids.toList()
+    /**
+     * Moves the selected items ([items]: those shown) to [date] (null: Anytime); [where] names it for the Undo bar
+     * ("Sat 21 Nov").
+     */
+    fun moveSelected(items: List<ShoppingItem>, date: java.time.LocalDate?, where: String) {
+        val ids = items.map { it.id }.filter { it in selection.ids }
         selection.clear()
-        deleteLists(ids)
+        if (ids.isEmpty()) return
+        appScope.launch { repo.moveItems(ids, date)?.let { bin.itemsMoved(it, where) } }
     }
 
-    /** Deleting the list being viewed shows Anytime (so Undo brings the list back with its date). */
-    private fun deleteLists(ids: List<Long>) {
-        if (listId.value in ids) select(1L)
-        appScope.launch { bin.trash(BinKind.LIST, ids) }
+    /** Removes the selected items ([items]: those shown), with Undo for a moment. */
+    fun deleteSelected(items: List<ShoppingItem>) {
+        val gone = items.filter { it.id in selection.ids }
+        selection.clear()
+        if (gone.isEmpty()) return
+        appScope.launch {
+            repo.deleteItems(gone.map { it.id })
+            bin.itemsRemoved(gone)
+        }
+    }
+
+    /** ✎ → Delete this list: it goes to the recycle bin; the day stays shown, now with nothing planned. */
+    fun deleteList(id: Long) {
+        appScope.launch { bin.trash(BinKind.LIST, listOf(id)) }
     }
 
     private companion object {
-        const val KEY = "shopping_list"
+        const val KEY_DAY = "shopping_day"
     }
 }
 

@@ -60,6 +60,9 @@ class ShoppingRepository(
 
     suspend fun delete(id: Long) = lock.withLock { dao.delete(id) }
 
+    /** Removes several items at once (selected). */
+    suspend fun deleteItems(ids: List<Long>) = lock.withLock { ids.forEach { dao.delete(it) } }
+
     /** Puts back an item removed with ✕ (Undo), unless its list is gone or has it again. */
     suspend fun restoreItem(item: ShoppingItem) = lock.withLock { dao.restoreItem(item) }
 
@@ -92,9 +95,11 @@ class ShoppingRepository(
     }
 
     /** The list for [date], made if there isn't one yet. Returns its id. */
-    suspend fun listForDate(date: LocalDate): Long = lock.withLock {
+    suspend fun listForDate(date: LocalDate): Long = lock.withLock { listForDateUnlocked(date) }
+
+    private suspend fun listForDateUnlocked(date: LocalDate): Long {
         val key = date.toString()
-        dao.allLists().firstOrNull { it.date == key }?.id ?: dao.insertList(
+        return dao.allLists().firstOrNull { it.date == key }?.id ?: dao.insertList(
             ShoppingList(name = key, date = key, createdAt = clock.millis(), position = dao.maxListPosition() + 1)
         ).also { AppLog.i("Shopping", "New list $it for $key") }
     }
@@ -106,8 +111,8 @@ class ShoppingRepository(
      * Tidies past lists (see [listsToTidy]) into the recycle bin, except [keep] (the list on screen). Run when Shopping
      * opens. "Today" is in the phone's current time zone, as the screen shows it.
      */
-    suspend fun tidyPast(keep: Long, today: LocalDate = LocalDate.now()) = lock.withLock {
-        val lists = dao.allLists().filter { it.id != keep }
+    suspend fun tidyPast(keep: Set<Long>, today: LocalDate = LocalDate.now()) = lock.withLock {
+        val lists = dao.allLists().filter { it.id !in keep }
         val past = lists.filter { l -> l.date?.let { runCatching { LocalDate.parse(it) }.getOrNull() }?.isBefore(today) == true }
         val withOpen = past.filter { dao.openItems(it.id).isNotEmpty() }.map { it.id }.toSet()
         val ids = listsToTidy(lists, today, withOpen, ZoneId.systemDefault())
@@ -126,8 +131,47 @@ class ShoppingRepository(
         if (moved > 0) AppLog.i("Shopping", "Carried $moved item(s) over to today's list")
     }
 
-    /** "My order": the lists' ids in their new order. */
-    suspend fun arrangeLists(ids: List<Long>) = lock.withLock { dao.setListPositions(ids) }
+    /**
+     * Moves items [ids] to the list for [date] (null: Anytime), made if needed. An item that list already has isn't
+     * added twice (see [planMove]). Returns what Undo needs, or null when nothing moved.
+     */
+    suspend fun moveItems(ids: List<Long>, date: LocalDate?): MoveUndo? = lock.withLock {
+        val had = date == null || dao.allLists().any { it.date == date.toString() }
+        val target = if (date == null) 1L else listForDateUnlocked(date)
+        val undo = dao.moveItems(ids, target, clock.millis())?.takeIf { it.moved.isNotEmpty() }
+        if (undo == null) {
+            // Nothing moved: a list made just for it goes again.
+            if (!had && dao.itemCount(target) == 0) dao.deleteList(target)
+            return@withLock null
+        }
+        AppLog.i("Shopping", "Moved ${undo.moved.size} item(s) to list $target")
+        if (had) undo else undo.copy(madeList = target)
+    }
+
+    /** Undo of [moveItems]. */
+    suspend fun undoMove(undo: MoveUndo) = lock.withLock { dao.undoMove(undo) }
+
+    /**
+     * Adds [input] ("2x milk") to the list for [date] (null: Anytime), making that day's list if it has none yet; in one
+     * go, so a delete or a date change meanwhile can't lose it or put it on another day.
+     */
+    suspend fun addOn(date: LocalDate?, input: String) = lock.withLock {
+        val parsed = Shopping.parse(input) ?: return@withLock
+        val id = if (date == null) 1L else listForDateUnlocked(date)
+        val added = dao.addItem(id, parsed.name, parsed.quantity, clock.millis()) ?: return@withLock
+        AppLog.i("Shopping", (if (added) "Added " else "Re-added ") + parsed.name +
+            parsed.quantity.let { if (it.isEmpty()) "" else " ($it)" } + " to list $id")
+    }
+
+    /**
+     * Lists without a date other than Anytime (left by older versions, which restored a list whose day had another
+     * list without its date) have no place in the week strip: their items go onto Anytime.
+     */
+    suspend fun foldUndated() = lock.withLock {
+        val stray = dao.allLists().filter { it.id != 1L && it.date == null }
+        stray.forEach { dao.mergeList(it.id, 1L, clock.millis()) }
+        if (stray.isNotEmpty()) AppLog.i("Shopping", "Put the items of ${stray.size} list(s) without a date on Anytime")
+    }
 
     /** "My order": the items' ids (of one list) in their new order. */
     suspend fun arrangeItems(listId: Long, ids: List<Long>) = lock.withLock { dao.setItemPositions(listId, ids) }
@@ -135,11 +179,6 @@ class ShoppingRepository(
     /** "My order" chosen the first time: [order] of the list's items still to buy, read and saved in one go. */
     suspend fun arrangeItemsFrom(listId: Long, order: (List<ShoppingItem>) -> List<ShoppingItem>) = lock.withLock {
         dao.setItemPositions(listId, order(dao.openItems(listId)).map { it.id })
-    }
-
-    /** "My order" chosen the first time for the lists: [order] of the lists in use, read and saved in one go. */
-    suspend fun arrangeListsFrom(order: (List<ShoppingList>) -> List<ShoppingList>) = lock.withLock {
-        dao.setListPositions(order(dao.allLists()).map { it.id })
     }
 
     private suspend fun trashUnlocked(ids: List<Long>) {
@@ -150,18 +189,24 @@ class ShoppingRepository(
     }
 
     /**
-     * Back from the bin, with their reminders when still to come. A list whose day has another list by now comes
-     * back without a date (see [restoredDate]).
+     * Back from the bin, with their reminders when still to come. A list whose day has another list by now (or, from
+     * an older version, without a date) puts its items on that list (or Anytime) instead, not twice.
      */
     suspend fun restoreLists(ids: List<Long>) = lock.withLock {
         for (id in ids) {
             val list = dao.list(id)?.takeIf { it.deletedAt != null } ?: continue
-            val taken = dao.allLists().mapNotNull { it.date }.toSet()
+            val into = restoreTarget(list, dao.allLists())
+            if (into != null) {
+                dao.mergeList(id, into, clock.millis())
+                alarms.sync(AlarmScheduler.LIST, id, emptySet())
+                AppLog.i("Shopping", "Restored list $id onto list $into (its day has a list)")
+                continue
+            }
             // Brought back by hand, so it is kept: counted as made now, it isn't tidied away again (see listsToTidy).
-            val back = restoredList(list, taken).copy(createdAt = clock.millis())
+            val back = list.copy(deletedAt = null, createdAt = clock.millis())
             dao.updateList(back)
             alarms.sync(AlarmScheduler.LIST, id, setOfNotNull(back.reminderTime()))
-            AppLog.i("Shopping", "Restored list $id" + if (back.date != list.date) " without its date (${list.date} has a list)" else "")
+            AppLog.i("Shopping", "Restored list $id")
         }
     }
 
@@ -266,9 +311,57 @@ fun ShoppingList.isPast(today: LocalDate): Boolean =
 fun ShoppingList.reminderTime(): LocalDateTime? = if (deletedAt != null) null else AlarmPlanner.listTime(date, remindAt)
 
 /**
- * [list] as it comes back from the bin: as it was, or, when its date has another list by now ([taken]), without a date
- * or reminder, named after the day it had.
+ * Where a list coming back from the bin goes: null, back as it was; or the id of the list in use ([inUse]) whose day it
+ * had by now, or Anytime (1) for a list without a date: its items go there.
  */
-fun restoredList(list: ShoppingList, taken: Set<String>): ShoppingList =
-    if (list.date != null && list.date in taken) list.copy(name = "Restored (${list.date})", date = null, remindAt = null, deletedAt = null)
-    else list.copy(deletedAt = null)
+fun restoreTarget(list: ShoppingList, inUse: List<ShoppingList>): Long? = when {
+    list.id == 1L -> null
+    list.date == null -> 1L
+    else -> inUse.firstOrNull { it.id != list.id && it.date == list.date }?.id
+}
+
+/**
+ * What [ShoppingDao.moveItems] changed: the moved items and the target list's merged items as they were before
+ * ([moved], [merged]) and just after ([after]: id → row, absent when merged away), and the target list when the move
+ * made it ([madeList]).
+ */
+data class MoveUndo(
+    val moved: List<ShoppingItem>,
+    val merged: List<ShoppingItem>,
+    val after: Map<Long, ShoppingItem> = emptyMap(),
+    val madeList: Long? = null,
+)
+
+/** Moving items: rows to [move] onto the target, target rows to [merge] into, and moved items to [drop] (merged). */
+data class MovePlan(val move: List<ShoppingItem>, val merge: List<ShoppingItem>, val drop: List<Long>)
+
+/**
+ * Moving [moving] onto list [targetId] (its items [target]; [lastPosition] the highest place on it). They go at its end,
+ * ticks kept. One the list already has (by name), or that comes twice, isn't added twice: the one there keeps its place,
+ * takes the moved quantity (unless only it had one), and is still to buy if either was.
+ */
+fun planMove(moving: List<ShoppingItem>, target: List<ShoppingItem>, targetId: Long, lastPosition: Long, now: Long): MovePlan {
+    val there = target.associateBy { it.key }.toMutableMap()
+    val moved = LinkedHashMap<String, ShoppingItem>()
+    val merged = LinkedHashMap<Long, ShoppingItem>()
+    val drop = mutableListOf<Long>()
+    var position = lastPosition
+    for (item in moving) {
+        if (item.listId == targetId) continue
+        val kept = moved[item.key] ?: there[item.key]
+        if (kept == null) {
+            moved[item.key] = item.copy(listId = targetId, position = ++position, addedAt = now + moved.size)
+            continue
+        }
+        drop += item.id
+        val checked = kept.checked && item.checked
+        val into = kept.copy(
+            quantity = item.quantity.ifEmpty { kept.quantity },
+            checked = checked,
+            checkedAt = if (checked) kept.checkedAt else 0,
+            addedAt = if (kept.checked && !checked) now else kept.addedAt,
+        )
+        if (item.key in moved) moved[item.key] = into else { there[item.key] = into; merged[into.id] = into }
+    }
+    return MovePlan(moved.values.toList(), merged.values.toList(), drop)
+}

@@ -30,6 +30,14 @@ sealed interface BinEvent {
     data class ItemRemoved(val item: ShoppingItem, override val at: Long = System.currentTimeMillis()) : BinEvent {
         override val text = "Removed ${item.name}"
     }
+    /** Several shopping items removed at once (selected). */
+    data class ItemsRemoved(val items: List<ShoppingItem>, override val at: Long = System.currentTimeMillis()) : BinEvent {
+        override val text = if (items.size == 1) "Removed ${items[0].name}" else "Removed ${items.size} items"
+    }
+    /** Shopping items moved to another day ([where]: "Sat 21 Nov", "Anytime"). */
+    data class ItemsMoved(val undo: MoveUndo, val where: String, override val at: Long = System.currentTimeMillis()) : BinEvent {
+        override val text = (if (undo.moved.size == 1) "Moved ${undo.moved[0].name}" else "Moved ${undo.moved.size} items") + " to $where"
+    }
 }
 
 /**
@@ -75,9 +83,21 @@ class RecycleBin(
         _events.trySend(BinEvent.ItemRemoved(item))
     }
 
+    /** Selected shopping items removed: offered back for a moment, as one. */
+    fun itemsRemoved(items: List<ShoppingItem>) {
+        if (items.isNotEmpty()) _events.trySend(BinEvent.ItemsRemoved(items))
+    }
+
+    /** Shopping items moved to another day: "Moved 3 items to Sat 21 Nov · Undo". */
+    fun itemsMoved(undo: MoveUndo, where: String) {
+        if (undo.moved.isNotEmpty()) _events.trySend(BinEvent.ItemsMoved(undo, where))
+    }
+
     suspend fun undo(event: BinEvent) = when (event) {
         is BinEvent.Trashed -> restore(event.kind, event.ids)
         is BinEvent.ItemRemoved -> shopping.restoreItem(event.item)
+        is BinEvent.ItemsRemoved -> event.items.forEach { shopping.restoreItem(it) }
+        is BinEvent.ItemsMoved -> shopping.undoMove(event.undo)
     }
 
     /** Everything in the bin, newest first. */

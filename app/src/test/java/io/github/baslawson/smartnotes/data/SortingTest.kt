@@ -55,27 +55,6 @@ class SortingTest {
         assertEquals(listOf(2L, 3L, 1L), Sorting.items(items, ItemSort.MINE).map { it.id })
     }
 
-    @Test fun listsByDateOrInMyOrderWithAnytimeTodayTomorrowFirst() {
-        val today = LocalDate.of(2026, 11, 11)
-        val lists = listOf(
-            ShoppingList(1, "Shopping", position = 3),
-            ShoppingList(2, "", date = "2026-11-10", position = 0),
-            ShoppingList(3, "", date = "2026-11-12", position = 9), // tomorrow
-            ShoppingList(4, "", date = "2026-11-11", position = 8), // today
-            ShoppingList(5, "", date = "2026-11-20", position = 0),
-            ShoppingList(6, "", date = "2026-11-15", position = 2),
-        )
-        assertEquals(listOf(1L, 4L, 3L, 6L, 5L, 2L), Sorting.lists(lists, ListSort.DATE, today).map { it.id })
-        // My order arranges only what comes after Anytime, Today and Tomorrow (same place: date order decides).
-        assertEquals(listOf(1L, 4L, 3L, 5L, 2L, 6L), Sorting.lists(lists, ListSort.MINE, today).map { it.id })
-        // No list for today: Anytime, then Tomorrow.
-        assertEquals(listOf(1L, 3L, 5L, 2L, 6L), Sorting.lists(lists.filter { it.id != 4L }, ListSort.MINE, today).map { it.id })
-        // A list restored without its date isn't pinned: it is arranged like the rest.
-        val restored = lists + ShoppingList(7, "Restored (2026-11-11)", position = 1)
-        assertEquals(listOf(1L, 4L, 3L, 7L, 6L, 5L, 2L), Sorting.lists(restored, ListSort.DATE, today).map { it.id })
-        assertEquals(listOf(1L, 4L, 3L, 5L, 2L, 7L, 6L), Sorting.lists(restored, ListSort.MINE, today).map { it.id })
-    }
-
     @Test fun moveTakesARowToWhereAnotherWas() {
         assertEquals(listOf(2L, 3L, 1L, 4L), Sorting.move(listOf(1, 2, 3, 4), 1, 3))
         assertEquals(listOf(4L, 1L, 2L, 3L), Sorting.move(listOf(1, 2, 3, 4), 4, 1))

@@ -59,7 +59,6 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.activity.compose.BackHandler
-import io.github.baslawson.smartnotes.data.isPast
 import io.github.baslawson.smartnotes.data.nextDue
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
@@ -82,7 +81,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.material3.Surface
 import sh.calvin.reorderable.rememberReorderableLazyListState
 import sh.calvin.reorderable.ReorderableItem
-import io.github.baslawson.smartnotes.data.ListSort
 import io.github.baslawson.smartnotes.data.ItemSort
 import io.github.baslawson.smartnotes.data.TaskSort
 import io.github.baslawson.smartnotes.data.Sorting
@@ -101,6 +99,23 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.disabled
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
+import io.github.baslawson.smartnotes.data.Week
+import kotlinx.coroutines.launch
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -146,9 +161,14 @@ fun BackButton(onBack: () -> Unit) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DatePickDialog(initial: LocalDate?, onPick: (LocalDate) -> Unit, onDismiss: () -> Unit) {
+fun DatePickDialog(initial: LocalDate?, onPick: (LocalDate) -> Unit, onDismiss: () -> Unit, earliest: LocalDate? = null) {
     val state = rememberDatePickerState(
-        initialSelectedDateMillis = (initial ?: LocalDate.now()).atStartOfDay().toInstant(ZoneOffset.UTC).toEpochMilli()
+        initialSelectedDateMillis = (initial ?: earliest ?: LocalDate.now()).atStartOfDay().toInstant(ZoneOffset.UTC).toEpochMilli(),
+        selectableDates = object : androidx.compose.material3.SelectableDates {
+            override fun isSelectableDate(utcTimeMillis: Long): Boolean =
+                earliest == null || !Instant.ofEpochMilli(utcTimeMillis).atZone(ZoneOffset.UTC).toLocalDate().isBefore(earliest)
+            override fun isSelectableYear(year: Int): Boolean = earliest == null || year >= earliest.year
+        },
     )
     DatePickerDialog(
         onDismissRequest = onDismiss,
@@ -193,49 +213,6 @@ fun <T> ChoiceRow(label: String, value: String, choices: List<T>, choiceLabel: (
 fun soundLabel(sound: ReminderSound, setting: ReminderSound): String =
     if (sound == ReminderSound.DEFAULT) "Default (${setting.label})" else sound.label
 
-@Composable
-private fun ListChips(
-    names: List<Pair<Long, String>>,
-    selected: Long,
-    selection: Selection,
-    onSelect: (Long) -> Unit,
-    pastCount: Int,
-    onPast: () -> Unit,
-    onAdd: () -> Unit,
-) {
-    val row = rememberLazyListState()
-    // The list being viewed is scrolled into sight (when it changes, and once the lists are there).
-    val index = names.indexOfFirst { it.first == selected }
-    LaunchedEffect(selected, index) {
-        if (index < 0) return@LaunchedEffect
-        // After the row has laid out its chips (on first showing it may not have yet).
-        snapshotFlow { row.layoutInfo.totalItemsCount }.first { it > index }
-        val info = row.layoutInfo
-        val chip = info.visibleItemsInfo.firstOrNull { it.index == index }
-        val inSight = chip != null && chip.offset >= info.viewportStartOffset && chip.offset + chip.size <= info.viewportEndOffset
-        if (!inSight) row.animateScrollToItem(index)
-    }
-    LazyRow(
-        state = row,
-        contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        items(names, key = { it.first }) { (id, name) ->
-            // A long press selects a list (Anytime, list 1, always stays); while selecting, a tap does too.
-            val canPick = id != 1L
-            SelectableChip(
-                name, current = id == selected && !selection.active, picked = id in selection.ids,
-                onClick = { if (selection.active) { if (canPick) selection.toggle(id) } else onSelect(id) },
-                onLongClick = if (canPick) ({ selection.toggle(id) }) else null,
-            )
-        }
-        if (pastCount > 0 && !selection.active) item(key = "past") {
-            FilterChip(selected = false, onClick = onPast, label = { Text("Past ($pastCount)") })
-        }
-        if (!selection.active) item(key = "new") { FilterChip(selected = false, onClick = onAdd, label = { Text("+ New date") }) }
-    }
-}
-
 /** Today's date, moving on at midnight while the screen is open and checked again whenever it comes back into view. */
 @Composable
 private fun rememberToday(): LocalDate {
@@ -253,36 +230,6 @@ private fun rememberToday(): LocalDate {
         }
     }
     return today
-}
-
-/** The Past chip: lists whose day has gone, newest first, with what each still has to buy. */
-@Composable
-private fun PastListsDialog(
-    lists: List<ShoppingList>,
-    openCounts: Map<Long, Int>,
-    selected: Long,
-    label: (ShoppingList) -> String,
-    onPick: (Long) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Past lists") },
-        text = {
-            LazyColumn {
-                items(lists, key = { it.id }) { l ->
-                    val left = openCounts[l.id] ?: 0
-                    ListItem(
-                        headlineContent = { Text(label(l), fontWeight = if (l.id == selected) FontWeight.Bold else null) },
-                        supportingContent = { Text(if (left == 0) "Nothing left to buy" else "$left left to buy") },
-                        modifier = Modifier.clickable { onPick(l.id); onDismiss() },
-                        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                    )
-                }
-            }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
-    )
 }
 
 /** Search results: matching items grouped under their list (lists in chip order); a tap opens that list. */
@@ -592,64 +539,72 @@ private fun Hint(text: String) {
 fun ShoppingList.label(style: DateStyle, relative: Boolean = true): String =
     parseDate(date)?.let { if (relative) style.dayLabel(it) else style.format(it) } ?: if (id == 1L) "Anytime" else name
 
-/** The top bar: the list's day and full date ("Today · 11/11/2026"), or "Anytime". */
-private fun ShoppingList.title(style: DateStyle): String = parseDate(date)?.let { d ->
-    val day = style.dayLabel(d)
-    val full = style.format(d)
-    if (day == full) full else "$day · $full"
-} ?: label(style)
+/** A day as the Shopping screen names it: Today, Tomorrow, Yesterday, else its weekday ("Saturday"). */
+private fun dayName(day: LocalDate, today: LocalDate): String = when (day) {
+    today -> "Today"
+    today.plusDays(1) -> "Tomorrow"
+    today.minusDays(1) -> "Yesterday"
+    else -> day.dayOfWeek.getDisplayName(java.time.format.TextStyle.FULL, java.util.Locale.getDefault())
+}
 
+/** "Sat 21 Nov" (with the year when it isn't this year's): where things were moved, for the Undo bar. */
+private fun shortDay(day: LocalDate?, today: LocalDate): String = when (day) {
+    null -> "Anytime"
+    today -> "today"
+    today.plusDays(1) -> "tomorrow"
+    else -> DateStyle.SHORT.format(day, today)
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ShoppingScreen(vm: ShoppingViewModel, setting: ReminderSound, onBack: () -> Unit, bottomBar: @Composable () -> Unit) {
     val state by vm.state.collectAsStateWithLifecycle()
+    val day by vm.day.collectAsStateWithLifecycle()
     val listId by vm.listId.collectAsStateWithLifecycle()
     val style = LocalDateStyle.current
-    // The list being edited, kept through a rotation; the dialog keeps its own fields.
-    var editingId by rememberSaveable { mutableStateOf<Long?>(null) }
-    val editing = editingId?.let { id -> state.lists.firstOrNull { it.id == id } }
-    // + New date: a date picker; that day's list is made (or opened, if there is one).
-    var pickNew by rememberSaveable { mutableStateOf(false) }
-    // The item being renamed (kept through a rotation); closes if the item goes or another list is opened.
-    var renamingId by rememberSaveable { mutableStateOf<Long?>(null) }
-    val renaming = renamingId?.let { id -> state.items.firstOrNull { it.id == id } }
-    // Gone (deleted, or another list opened): closed for good, so Undo or coming back doesn't reopen it.
-    LaunchedEffect(state.loaded, renaming == null) { if (state.loaded && renamingId != null && renaming == null) renamingId = null }
+    val today = rememberToday()
+    // Midnight (or back after a day away): carry over and tidy as on opening, and "today" moves on with the date.
+    var seenDay by rememberSaveable { mutableStateOf(today.toString()) }
+    LaunchedEffect(today) {
+        if (today.toString() != seenDay) {
+            if (day?.toString() == seenDay) vm.show(today)
+            seenDay = today.toString()
+            vm.dayChanged()
+        }
+    }
     val list = state.lists.firstOrNull { it.id == listId }
-    // Nothing shown yet (the first time), or the list shown has gone: today's list.
-    LaunchedEffect(state.loaded, list) { if (state.loaded && listToShow(listId, state.lists) == null) vm.openToday() }
+    // ✎: the day's date and reminder (a day without a list gets one when saved). Kept through a rotation.
+    var editing by rememberSaveable { mutableStateOf(false) }
+    // The item being renamed (kept through a rotation); closes if the item goes or another day is shown.
+    var renamingId by rememberSaveable { mutableStateOf<Long?>(null) }
+    val renaming = renamingId?.let { id -> (state.items + state.anytime).firstOrNull { it.id == id } }
+    LaunchedEffect(state.loaded, renaming == null) { if (state.loaded && renamingId != null && renaming == null) renamingId = null }
     val itemSort by vm.itemSort.collectAsStateWithLifecycle()
-    val listSort by vm.listSort.collectAsStateWithLifecycle()
-    var arrangeLists by rememberSaveable { mutableStateOf(false) }
     val showTicked by vm.showTicked.collectAsStateWithLifecycle()
-    // One per list: switching lists ends a party that belongs to the last one.
-    val party = remember(listId) { Celebration() }
+    // One per day: switching days ends a party that belongs to the last one.
+    val party = remember(day) { Celebration() }
     val open = Sorting.items(state.items.filter { !it.checked }, itemSort)
     val checked = state.items.filter { it.checked }
+    // On today: what is on Anytime shows below, to tick off in the shop too.
+    val anytimeOpen = if (day == today) Sorting.items(state.anytime.filter { !it.checked }, itemSort) else emptyList()
     val selection = vm.selection
-    val today = rememberToday()
-    // Midnight (or back after a day away): carry over and tidy as on opening. Not on first showing (init did it).
-    var seenDay by rememberSaveable { mutableStateOf(today.toString()) }
-    LaunchedEffect(today) { if (today.toString() != seenDay) { seenDay = today.toString(); vm.dayChanged() } }
-    // Past lists live under the Past chip; the chips show Anytime, today and coming days (and a past list while open).
-    val (pastLists, currentLists) = state.lists.partition { it.isPast(today) }
-    val chipLists = Sorting.lists(currentLists, listSort, today) + listOfNotNull(pastLists.firstOrNull { it.id == listId })
-    // Only chips on screen can be selected: Select all never picks past lists hidden under Past.
-    val pickable = chipLists.filter { it.id != 1L }.map { it.id }
-    var showPast by rememberSaveable { mutableStateOf(false) }
+    val shown = open + (if (showTicked) checked else emptyList()) + anytimeOpen
+    LaunchedEffect(shown.map { it.id }) { if (state.loaded) selection.keepOnly(shown.map { it.id }) }
+    var moving by rememberSaveable { mutableStateOf(false) }
     val openCounts by vm.openCounts.collectAsStateWithLifecycle()
+    // Days with something still to buy: a dot in the strip.
+    val marked = state.lists.mapNotNull { l -> parseDate(l.date)?.takeIf { (openCounts[l.id] ?: 0) > 0 } }.toSet()
+    val anytimeCount = openCounts[1L] ?: 0
     val query by vm.searchQuery.collectAsStateWithLifecycle()
     val results by vm.searchResults.collectAsStateWithLifecycle()
     val searchFocus = remember { FocusRequester() }
     BackHandler(enabled = query != null) { vm.searchQuery.value = null }
 
-    LaunchedEffect(pickable) { if (state.loaded) selection.keepOnly(pickable) }
-
     Scaffold(
         topBar = {
-            if (selection.active) SelectionBar(selection, pickable) {
-                IconButton(onClick = vm::deleteSelected) { Icon(Icons.Default.Delete, contentDescription = "Delete lists") }
+            if (selection.active) SelectionBar(selection, shown.map { it.id }) {
+                IconButton(onClick = { moving = true }) { Icon(Icons.Default.DateRange, contentDescription = "Move to another day") }
+                IconButton(onClick = { vm.deleteSelected(shown) }) { Icon(Icons.Default.Delete, contentDescription = "Remove items") }
             } else if (query != null) TopAppBar(
                 title = {
                     TextField(
@@ -668,18 +623,14 @@ fun ShoppingScreen(vm: ShoppingViewModel, setting: ReminderSound, onBack: () -> 
                     if (!query.isNullOrEmpty()) IconButton(onClick = { vm.searchQuery.value = "" }) { Icon(Icons.Default.Clear, contentDescription = "Clear search") }
                 },
             ) else TopAppBar(
-                title = { Text(list?.title(style) ?: "Shopping", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                title = { Text("Shopping") },
                 navigationIcon = { BackButton(onBack) },
                 actions = {
+                    if (day != null) IconButton(onClick = { editing = true }) { Icon(Icons.Default.Edit, contentDescription = "Day and reminder") }
                     SortButton(
                         SortGroup("Items", ItemSort.entries, itemSort, { it.label }, vm::setItemSort),
-                        SortGroup("Lists", ListSort.entries, listSort, { it.label }, vm::setListSort),
-                        extra = { close ->
-                            ShowCompletedItem(showTicked) { close(); vm.toggleShowTicked() }
-                            DropdownMenuItem(text = { Text("Arrange lists…") }, onClick = { close(); arrangeLists = true })
-                        },
+                        extra = { close -> ShowCompletedItem(showTicked) { close(); vm.toggleShowTicked() } },
                     )
-                    if (list != null && list.id != 1L) IconButton(onClick = { editingId = list.id }) { Icon(Icons.Default.Edit, contentDescription = "List date and reminder") }
                 },
             )
         },
@@ -688,84 +639,89 @@ fun ShoppingScreen(vm: ShoppingViewModel, setting: ReminderSound, onBack: () -> 
         if (query != null) {
             Box(Modifier.padding(padding).fillMaxSize()) {
                 SearchResults(query.orEmpty(), results, orderLists(state.lists, today), { it.label(style) }) { id ->
-                    vm.select(id)
+                    state.lists.firstOrNull { it.id == id }?.let(vm::openList)
                     vm.searchQuery.value = null
                 }
             }
             return@Scaffold
         }
         Column(Modifier.padding(padding).fillMaxSize()) {
-            ListChips(chipLists.map { it.id to it.label(style) }, listId, selection, vm::select, pastLists.size, { showPast = true }) { pickNew = true }
-            if (selection.active) {
-                Text("Tap lists to select them. Anytime always stays.", style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
-            }
-            list?.let { l ->
-                val date = parseDate(l.date)
-                val time = parseTime(l.remindAt)
-                if (date != null && time != null) {
-                    Text(
-                        "⏰ Reminder at $time (${soundLabel(ReminderSound.of(l.sound), setting)})",
-                        style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-                    )
-                }
-            }
+            WeekStrip(today, day, marked, anytimeCount, onPick = vm::show, revision = vm.shownTimes)
+            DayHeader(day, today, list, done = checked.size, total = state.items.size)
             // Suggestions pop up right under the box while typing (the box keeps the keyboard).
-            val suggestions = vm.suggestions(state)
+            val suggestions = vm.suggestions(state, withAnytime = day == today)
             var fieldWidth by remember { mutableIntStateOf(0) }
             var focused by remember { mutableStateOf(false) }
-            Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
-            TextField(
-                value = vm.input,
-                onValueChange = { vm.input = it },
-                modifier = Modifier.fillMaxWidth().onSizeChanged { fieldWidth = it.width }.onFocusChanged { focused = it.isFocused },
-                shape = PillShape, colors = pillColors(),
-                leadingIcon = { Icon(Icons.Default.Add, contentDescription = null) },
-                placeholder = { Text("Add item, e.g. 2x milk") },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Done),
-                // Done adds the item and keeps the keyboard open for the next one.
-                keyboardActions = KeyboardActions(onDone = { vm.add() }),
-                // On the right: add what is typed, and search all lists (for what is typed, if anything).
-                trailingIcon = {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        if (vm.input.isNotBlank()) IconButton(onClick = { vm.add() }) { Icon(Icons.Default.Check, contentDescription = "Add") }
-                        IconButton(onClick = { vm.searchQuery.value = Shopping.parse(vm.input)?.name.orEmpty() }) { Icon(Icons.Default.Search, contentDescription = "Search all lists") }
-                    }
-                },
-            )
-            SuggestionsPopup(if (focused) suggestions else emptyList(), vm.input, fieldWidth, onPick = vm::pick, onForget = { vm.forget(it) })
+            val hint = when (day) {
+                null -> "Add to Anytime, e.g. batteries"
+                today -> "Add for today, e.g. 2x milk"
+                else -> "Add for ${day?.let { dayName(it, today) }}, e.g. 2x milk"
             }
-            ProgressLine(checked.size, state.items.size, "bought", Modifier.padding(horizontal = 20.dp, vertical = 6.dp))
-            if (state.loaded && state.items.isEmpty()) {
-                EmptyState(Icons.Default.ShoppingCart, "Nothing on this list yet", "Type an item above, like 2x milk.\nTap ✎ to give the list a date and a reminder.")
+            Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+                TextField(
+                    value = vm.input,
+                    onValueChange = { vm.input = it },
+                    modifier = Modifier.fillMaxWidth().onSizeChanged { fieldWidth = it.width }.onFocusChanged { focused = it.isFocused },
+                    shape = PillShape, colors = pillColors(),
+                    leadingIcon = { Icon(Icons.Default.Add, contentDescription = null) },
+                    placeholder = { Text(hint, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Done),
+                    // Done adds the item and keeps the keyboard open for the next one.
+                    keyboardActions = KeyboardActions(onDone = { vm.add() }),
+                    // On the right: add what is typed, and search all lists (for what is typed, if anything).
+                    trailingIcon = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (vm.input.isNotBlank()) IconButton(onClick = { vm.add() }) { Icon(Icons.Default.Check, contentDescription = "Add") }
+                            IconButton(onClick = { vm.searchQuery.value = Shopping.parse(vm.input)?.name.orEmpty() }) { Icon(Icons.Default.Search, contentDescription = "Search all lists") }
+                        }
+                    },
+                )
+                SuggestionsPopup(if (focused && !selection.active && !moving) suggestions else emptyList(), vm.input, fieldWidth, onPick = vm::pick, onForget = { vm.forget(it) })
+            }
+            if (state.loaded && state.items.isEmpty() && anytimeOpen.isEmpty()) {
+                val d = day
+                if (d == null) EmptyState(Icons.Default.ShoppingCart, "Nothing on Anytime", "Things to buy whenever go here.\nThey show on today's list too.")
+                else EmptyState(Icons.Default.DateRange, "Nothing planned yet", "Type above to start ${if (d == today) "today" else dayName(d, today)}'s list.\nA day with shopping gets a dot.")
                 return@Column
             }
-            val scroll = rememberLastScroll("shopping:$listId")
+            val scroll = rememberLastScroll("shopping:${day ?: ANYTIME}")
             val canArrange = !selection.active
             val byId = open.associateBy { it.id }
             val order = key(listId) { rememberDragOrder(open.map { it.id }, itemSort == ItemSort.MINE) }
             val reorder = rememberReorderableLazyListState(scroll) { from, to ->
                 val a = from.key as? Long
                 val b = to.key as? Long
-                // Only among the items still to buy.
+                // Only among the day's items still to buy.
                 if (a != null && b != null && a in byId && b in byId) order.move(a, b)
             }
             LazyColumn(Modifier.fillMaxSize(), scroll, contentPadding = PaddingValues(bottom = 24.dp)) {
                 item(key = "tip") {
-                    OneTimeTip("shopping", "Tap an item's name to rename it. Things not bought move to today's list by themselves; old lists wait under Past.")
+                    OneTimeTip("shopping-week", "Tap a day to plan its shopping. Long-press items to move them to another day; tap one to rename it. Things not bought move to today by themselves.")
                 }
                 items(order.ids.mapNotNull { byId[it] }, key = { it.id }) { item ->
                     ReorderableItem(reorder, key = item.id, enabled = canArrange) { dragging ->
                         RowCard(dragging = dragging) {
-                            ItemLine(item, onCheck = { now ->
+                            ItemLine(item, selection, onCheck = { now ->
                                 // Ticking off the last thing to buy: a little party.
                                 if (now && open.size == 1) party.fire(Celebration.SHOPPING.random())
                                 vm.setChecked(item, now)
                             }, onDelete = { vm.delete(item) }, onEdit = { renamingId = item.id }) {
                                 if (canArrange) DragHandleIcon(item.name, Modifier.draggableHandle(onDragStarted = { order.start() }, onDragStopped = { order.stop()?.let(vm::arrangeItems) }).padding(12.dp))
                             }
+                        }
+                    }
+                }
+                if (anytimeOpen.isNotEmpty()) {
+                    item(key = "h:anytime") {
+                        Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 16.dp, top = 12.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text("Also on Anytime (${anytimeOpen.size})", Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+                            Text("buy whenever", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                    items(anytimeOpen, key = { "a:${it.id}" }) { item ->
+                        RowCard(faded = true) {
+                            ItemLine(item, selection, onCheck = { vm.setChecked(item, it) }, onDelete = { vm.delete(item) }, onEdit = { renamingId = item.id })
                         }
                     }
                 }
@@ -778,28 +734,39 @@ fun ShoppingScreen(vm: ShoppingViewModel, setting: ReminderSound, onBack: () -> 
                     }
                     if (showTicked) items(checked, key = { it.id }) { item ->
                         RowCard(faded = true) {
-                            ItemLine(item, onCheck = { vm.setChecked(item, it) }, onDelete = { vm.delete(item) }, onEdit = { renamingId = item.id })
+                            ItemLine(item, selection, onCheck = { vm.setChecked(item, it) }, onDelete = { vm.delete(item) }, onEdit = { renamingId = item.id })
                         }
                     }
                 }
             }
         }
     }
-    editing?.let { l ->
-        ShoppingListDialog(
-            l, setting, taken = state.lists.filter { it.id != l.id }.mapNotNull { it.date }.toSet(),
-            onSave = { vm.saveList(it) }, onDelete = { vm.deleteList(it) }, onDismiss = { editingId = null },
-        )
+    val d = day
+    if (editing && d != null) {
+        val l = list ?: ShoppingList(name = d.toString(), date = d.toString())
+        key(l.id, l.date) {
+            ShoppingListDialog(
+                l, setting, taken = state.lists.filter { it.id != l.id }.mapNotNull { it.date }.toSet(),
+                onSave = { saved ->
+                    // A day without a list gets one only for a reminder: otherwise a list comes with its first item.
+                    if (saved.id != 0L || saved.remindAt != null) vm.saveList(saved)
+                    else parseDate(saved.date)?.let { if (it != d) vm.show(it) }
+                },
+                onDelete = { vm.deleteList(it) }, onDismiss = { editing = false },
+            )
+        }
     }
-    if (showPast) PastListsDialog(
-        orderLists(pastLists, today), openCounts, listId, { it.label(style) }, vm::select,
-    ) { showPast = false }
-    if (arrangeLists) ArrangeListsDialog(
-        Sorting.lists(currentLists, listSort, today), listSort == ListSort.MINE, { it.label(style) }, vm::arrangeLists,
-    ) { arrangeLists = false }
+    // Where the selected items are now: a day that holds them all can't be picked (nothing would move).
+    val sources = shown.filter { it.id in selection.ids }.map { if (it.listId == 1L) null else day }.toSet()
+    if (moving && selection.active) MoveSheet(
+        count = selection.ids.size, today = today, from = sources.singleOrNull(), fromKnown = sources.size == 1,
+        marked = marked, anytimeCount = anytimeCount,
+        onMove = { to -> moving = false; vm.moveSelected(shown, to, shortDay(to, today)) },
+        onDismiss = { moving = false },
+    )
     renaming?.let { item ->
-        EditItemDialog(item, others = state.items.filter { it.id != item.id }.map { it.key }.toSet(),
-            onSave = { vm.rename(item, it) }) { renamingId = null }
+        val others = (if (item.listId == 1L) state.anytime else state.items).filter { it.id != item.id }.map { it.key }.toSet()
+        EditItemDialog(item, others = others, onSave = { vm.rename(item, it) }) { renamingId = null }
     }
     if (vm.nameTaken) {
         AlertDialog(
@@ -809,19 +776,222 @@ fun ShoppingScreen(vm: ShoppingViewModel, setting: ReminderSound, onBack: () -> 
             confirmButton = { TextButton(onClick = { vm.nameTaken = false }) { Text("OK") } },
         )
     }
-    if (pickNew) DatePickDialog(null, onPick = { vm.openDate(it) }, onDismiss = { pickNew = false })
     CelebrationOverlay(party)
     if (vm.dateTaken) {
         AlertDialog(
             onDismissRequest = { vm.dateTaken = false },
             title = { Text("Not saved") },
-            text = { Text("Another list already has that date.") },
+            text = { Text("That day already has a list. Long-press items to move them there instead.") },
             confirmButton = { TextButton(onClick = { vm.dateTaken = false }) { Text("OK") } },
         )
     }
 }
 
-/** A dated list's settings: its date (one list per day, [taken] are the others'), and that day an optional reminder. */
+/** Pages in the week strip: this week in the middle, about 19 years either side. */
+private const val WEEKS = 2001
+private const val THIS_WEEK = 1000
+
+/**
+ * The Anytime tile and a week of days (swipe, or ‹ ›, for others): [selected] filled (null: Anytime), today ringed,
+ * [marked] days with a dot. "Today" comes back to today. [allowPast] false: days gone by can't be picked (Move to…).
+ */
+@Composable
+private fun WeekStrip(
+    today: LocalDate,
+    selected: LocalDate?,
+    marked: Set<LocalDate>,
+    anytimeCount: Int,
+    onPick: (LocalDate?) -> Unit,
+    allowPast: Boolean = true,
+    anytimeSelected: Boolean = selected == null,
+    revision: Int = 0,
+) {
+    val first = remember { Week.firstDay() }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    key(today) {
+        val pager = androidx.compose.foundation.pager.rememberPagerState(
+            initialPage = (THIS_WEEK + (selected?.let { Week.offset(today, it, first) } ?: 0)).coerceIn(0, WEEKS - 1),
+        ) { WEEKS }
+        // Showing a day (a search result, Today, even the same day again) brings its week into view.
+        LaunchedEffect(selected, revision) {
+            val page = THIS_WEEK + (selected?.let { Week.offset(today, it, first) } ?: return@LaunchedEffect)
+            if (page in 0 until WEEKS && pager.currentPage != page) pager.animateScrollToPage(page)
+        }
+        val shownStart = Week.startAt(today, pager.currentPage - THIS_WEEK, first)
+        Column {
+            Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(Week.monthLabel(shownStart), Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (pager.currentPage != THIS_WEEK || (selected != today && allowPast)) {
+                    OutlinedButton(
+                        onClick = { onPick(today); scope.launch { pager.animateScrollToPage(THIS_WEEK) } },
+                        contentPadding = PaddingValues(horizontal = 12.dp), modifier = Modifier.heightIn(min = 32.dp),
+                    ) { Text("Today") }
+                }
+                IconButton(onClick = { scope.launch { pager.animateScrollToPage((pager.currentPage - 1).coerceAtLeast(0)) } }) {
+                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = "Previous week")
+                }
+                IconButton(onClick = { scope.launch { pager.animateScrollToPage((pager.currentPage + 1).coerceAtMost(WEEKS - 1)) } }) {
+                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "Next week")
+                }
+            }
+            Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 2.dp, bottom = 8.dp), verticalAlignment = Alignment.Top) {
+                AnytimeTile(anytimeSelected, anytimeCount) { onPick(null) }
+                Box(Modifier.padding(horizontal = 6.dp, vertical = 6.dp).width(1.dp).height(52.dp).background(MaterialTheme.colorScheme.outlineVariant))
+                androidx.compose.foundation.pager.HorizontalPager(pager, Modifier.weight(1f)) { page ->
+                    val start = Week.startAt(today, page - THIS_WEEK, first)
+                    Row(Modifier.fillMaxWidth()) {
+                        Week.days(start).forEach { date ->
+                            DayCell(
+                                Modifier.weight(1f),
+                                date, today, picked = date == selected && !anytimeSelected, marked = date in marked,
+                                enabled = allowPast || !date.isBefore(today),
+                            ) { onPick(date) }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AnytimeTile(picked: Boolean, count: Int, onClick: () -> Unit) {
+    val c = MaterialTheme.colorScheme
+    Box {
+        Column(
+            Modifier.size(width = 56.dp, height = 64.dp)
+                .background(if (picked) c.primaryContainer else c.surfaceContainerLowest, MaterialTheme.shapes.medium)
+                .border(1.5.dp, if (picked) c.primary else c.outlineVariant, MaterialTheme.shapes.medium)
+                .clearAndSetSemantics {
+                    contentDescription = "Anytime" + if (count > 0) ", $count to buy" else ""
+                    selected = picked
+                    role = Role.Tab
+                    onClick { onClick(); true }
+                }
+                .clickable(onClick = onClick),
+            horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
+        ) {
+            Text("∞", style = MaterialTheme.typography.titleLarge, color = if (picked) c.onPrimaryContainer else c.onSurfaceVariant)
+            Text("Anytime", style = MaterialTheme.typography.labelSmall, color = if (picked) c.onPrimaryContainer else c.onSurfaceVariant)
+        }
+        if (count > 0) {
+            Text(
+                count.toString(), style = MaterialTheme.typography.labelSmall, color = c.onPrimary,
+                modifier = Modifier.align(Alignment.TopEnd).offset(x = 6.dp, y = (-6).dp)
+                    .background(c.primary, PillShape).padding(horizontal = 6.dp, vertical = 1.dp).clearAndSetSemantics { },
+            )
+        }
+    }
+}
+
+@Composable
+private fun DayCell(
+    modifier: Modifier, date: LocalDate, today: LocalDate, picked: Boolean, marked: Boolean, enabled: Boolean, onClick: () -> Unit,
+) {
+    val c = MaterialTheme.colorScheme
+    val locale = java.util.Locale.getDefault()
+    val past = date.isBefore(today)
+    val name = date.dayOfWeek.getDisplayName(java.time.format.TextStyle.SHORT, locale)
+    Column(
+        modifier.heightIn(min = 48.dp)
+            .clearAndSetSemantics {
+                contentDescription = buildString {
+                    append(date.dayOfWeek.getDisplayName(java.time.format.TextStyle.FULL, locale)).append(' ')
+                    append(DateStyle.SHORT.format(date, today))
+                    if (date == today) append(", today")
+                    if (marked) append(", has shopping")
+                }
+                selected = picked
+                role = Role.Tab
+                if (enabled) onClick { onClick(); true } else disabled()
+            }
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(vertical = 2.dp)
+            .alpha(if (enabled) 1f else 0.38f),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(name, style = MaterialTheme.typography.labelSmall, color = if (date == today) c.primary else c.onSurfaceVariant, maxLines = 1)
+        Spacer(Modifier.height(4.dp))
+        Box(
+            Modifier.size(34.dp)
+                .background(if (picked) c.primary else Color.Transparent, CircleShape)
+                .border(2.dp, if (date == today && !picked) c.primary else Color.Transparent, CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                date.dayOfMonth.toString(), style = MaterialTheme.typography.titleSmall,
+                color = when {
+                    picked -> c.onPrimary
+                    past -> c.onSurfaceVariant
+                    else -> c.onSurface
+                },
+            )
+        }
+        Spacer(Modifier.height(4.dp))
+        Box(Modifier.size(5.dp).background(if (marked) c.primary else Color.Transparent, CircleShape))
+    }
+}
+
+/** "Today" / "Saturday" over the date and its reminder, with how much is bought. */
+@Composable
+private fun DayHeader(day: LocalDate?, today: LocalDate, list: ShoppingList?, done: Int, total: Int) {
+    val style = LocalDateStyle.current
+    Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 12.dp, top = 2.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(day?.let { dayName(it, today) } ?: "Anytime", style = MaterialTheme.typography.titleLarge)
+            val sub = if (day == null) "Buy whenever: shown on today's list too" else buildString {
+                append(style.format(day, today))
+                parseTime(list?.remindAt)?.let { append(" · ⏰ ").append(it) }
+            }
+            Text(sub, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        ProgressLine(done, total, "bought")
+    }
+}
+
+/** Move to…: Anytime, Today, Tomorrow, any day in the strip, or another date. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun MoveSheet(
+    count: Int,
+    today: LocalDate,
+    from: LocalDate?,
+    fromKnown: Boolean,
+    marked: Set<LocalDate>,
+    anytimeCount: Int,
+    onMove: (LocalDate?) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var pickDate by rememberSaveable { mutableStateOf(false) }
+    // [from] holds every selected item: moving there would do nothing. A day gone by isn't offered (things not bought
+    // come back to today by themselves).
+    val can = { to: LocalDate? -> !(fromKnown && to == from) && (to == null || !to.isBefore(today)) }
+    androidx.compose.material3.ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(Modifier.padding(bottom = 24.dp)) {
+            Text(
+                "Move ${if (count == 1) "1 item" else "$count items"} to…",
+                style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(start = 24.dp, end = 24.dp, bottom = 12.dp),
+            )
+            Row(Modifier.padding(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf<Pair<String, LocalDate?>>("Anytime" to null, "Today" to today, "Tomorrow" to today.plusDays(1)).forEach { (label, to) ->
+                    FilterChip(selected = false, enabled = can(to), onClick = { onMove(to) }, label = { Text(label) })
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+            WeekStrip(
+                today, selected = if (fromKnown) from else null, marked = marked, anytimeCount = anytimeCount,
+                onPick = { to -> if (can(to)) onMove(to) }, allowPast = false, anytimeSelected = fromKnown && from == null,
+            )
+            TextButton(onClick = { pickDate = true }, modifier = Modifier.padding(horizontal = 12.dp)) { Text("Another date…") }
+        }
+    }
+    if (pickDate) DatePickDialog(null, onPick = { if (can(it)) onMove(it) }, onDismiss = { pickDate = false }, earliest = today)
+}
+
+/**
+ * A day's list settings (✎): its date (one list per day, [taken] are the others'), that day an optional reminder, or
+ * delete it. A day without a list yet ([initial] id 0) gets one when saved.
+ */
 @Composable
 private fun ShoppingListDialog(
     initial: ShoppingList,
@@ -842,7 +1012,7 @@ private fun ShoppingListDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Shopping list") },
+        title = { Text(parseDate(initial.date)?.let { style.format(it) } ?: "Shopping list") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -885,27 +1055,31 @@ private fun ShoppingListDialog(
     }
 }
 
+/**
+ * An item: only the box ticks; a tap on the name renames it (no ticking by accident while scrolling or dragging); a long
+ * press selects it (to move to another day, or remove), after which taps select too.
+ */
 @Composable
 private fun ItemLine(
     item: ShoppingItem,
+    selection: Selection,
     onCheck: (Boolean) -> Unit,
     onDelete: () -> Unit,
     onEdit: () -> Unit,
     handle: @Composable () -> Unit = {},
 ) {
-    // Only the box ticks; a tap on the name opens it to rename (no ticking by accident while scrolling or dragging).
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().selectable(selection, item.id, onEdit), verticalAlignment = Alignment.CenterVertically) {
         FunCheckbox(checked = item.checked, onCheckedChange = onCheck)
         Text(
             item.name,
-            modifier = Modifier.weight(1f).clickable(onClickLabel = "Rename", onClick = onEdit).padding(vertical = 14.dp),
+            modifier = Modifier.weight(1f).padding(vertical = 14.dp),
             textDecoration = if (item.checked) TextDecoration.LineThrough else null,
             color = if (item.checked) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
         )
         if (item.quantity.isNotEmpty()) {
             Text(item.quantity, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
         }
-        IconButton(onClick = onDelete) { Icon(Icons.Default.Clear, contentDescription = "Remove ${item.name}") }
+        if (!selection.active) IconButton(onClick = onDelete) { Icon(Icons.Default.Clear, contentDescription = "Remove ${item.name}") }
         handle()
     }
 }
@@ -984,53 +1158,6 @@ private fun EditItemDialog(item: ShoppingItem, others: Set<String>, onSave: (Str
         },
         confirmButton = { TextButton(onClick = save, enabled = parsed != null && !taken) { Text("Save") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
-}
-
-/** Shopping → sort → Arrange lists…: the lists in "My order", dragged by their handles; each drop is saved. */
-@Composable
-private fun ArrangeListsDialog(
-    all: List<ShoppingList>,
-    mine: Boolean,
-    label: (ShoppingList) -> String,
-    onArrange: (List<Long>) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    // Anytime, Today and Tomorrow stay first (shown without handles); the later days can be dragged.
-    val today = rememberToday()
-    val (fixed, lists) = all.partition { Sorting.pinned(it, today) }
-    val byId = lists.associateBy { it.id }
-    val order = rememberDragOrder(lists.map { it.id }, mine)
-    val list = rememberLazyListState()
-    val reorder = rememberReorderableLazyListState(list) { from, to ->
-        val a = from.key as? Long
-        val b = to.key as? Long
-        if (a != null && b != null) order.move(a, b)
-    }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Arrange lists") },
-        text = {
-            LazyColumn(Modifier.heightIn(max = 420.dp), list) {
-                items(fixed, key = { "fixed:${it.id}" }) { l ->
-                    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp).heightIn(min = 40.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text(label(l), Modifier.weight(1f))
-                        Text("Always first", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(end = 8.dp))
-                    }
-                }
-                items(order.ids.mapNotNull { byId[it] }, key = { it.id }) { l ->
-                    ReorderableItem(reorder, key = l.id) { dragging ->
-                        Surface(shadowElevation = if (dragging) 6.dp else 0.dp) {
-                            Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Text(label(l), Modifier.weight(1f))
-                                DragHandleIcon(label(l), Modifier.draggableHandle(onDragStarted = { order.start() }, onDragStopped = { order.stop()?.let { onArrange(fixed.map { f -> f.id } + it) } }).padding(8.dp))
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } },
     )
 }
 

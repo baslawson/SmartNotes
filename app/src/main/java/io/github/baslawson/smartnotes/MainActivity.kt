@@ -253,7 +253,7 @@ private fun AppNavHost(nav: NavHostController, app: SmartNotesApp) {
             val start = entry.arguments?.getLong("list") ?: 0L
             val vm = viewModel { ShoppingViewModel(app.shopping, app.bin, app.appScope, app.getSharedPreferences("lists", android.content.Context.MODE_PRIVATE), start, app.settings) }
             // Opened again for another list (from a reminder): show that one.
-            LaunchedEffect(start) { if (start > 0) vm.select(start) }
+            LaunchedEffect(start) { if (start > 0) vm.openListId(start) }
             val setting by app.settings.reminderSound.collectAsStateWithLifecycle()
             AccentTheme(Accent.SHOPPING) { ShoppingScreen(vm, setting, onBack = back, bottomBar = bottomBar) }
         }
